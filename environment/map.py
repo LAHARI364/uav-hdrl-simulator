@@ -8,7 +8,7 @@ class SubRegion:
         self.y_start = y_start
         self.width = width
         self.height = height
-        self.workload = workload        # LOW, MEDIUM, HIGH, CRITICAL
+        self.workload = workload        # LOW, MEDIUM, HIGH
         self.task_density = 0.0
         self.congestion = 0.0
         self.uav_count = 0
