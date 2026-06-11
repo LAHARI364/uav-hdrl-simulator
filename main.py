@@ -18,5 +18,6 @@ for u in uavs:
 # Tasks
 gen = TaskGenerator()
 tasks = gen.generate_tasks(current_time=0.0, dt=1.0)
+print("Number of tasks:", len(tasks))
 for t in tasks:
     print(t)

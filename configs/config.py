@@ -12,7 +12,6 @@ BATTERY_WARNING = 20
 BATTERY_CRITICAL = 10
 BATTERY_EMERGENCY = 5
 
-# configs/config.py
 
 
 
@@ -21,18 +20,18 @@ REGION_WORKLOAD = {
     0:  "LOW",
     1:  "HIGH",
     2:  "MEDIUM",
-    3:  "CRITICAL",
+    3:  "HIGH",
     4:  "LOW",
     5:  "MEDIUM",
     6:  "HIGH",
     7:  "LOW",
-    8:  "CRITICAL",
+    8:  "HIGH",
     9:  "MEDIUM",
     10: "HIGH",
     11: "LOW",
     12: "MEDIUM",
     13: "HIGH",
-    14: "CRITICAL",
+    14: "HIGH",
     15: "LOW"
 }
 
@@ -42,7 +41,16 @@ MAX_SPEED = 20.0            # m/s
 UAV_COST = 1.0              # cost factor
 
 #Task Settings
-TASK_ARRIVAL_RATE = 5       # lambda for Poisson (tasks per second)
+WORKLOAD_TO_LAMBDA = {
+    "LOW": 2,
+    "MEDIUM": 5,
+    "HIGH": 10
+}
+
+TASK_ARRIVAL_RATE = {
+    region: WORKLOAD_TO_LAMBDA[state]
+    for region, state in REGION_WORKLOAD.items()
+}    
 PRIORITY_DISTRIBUTION = {"low": 0.5, "medium": 0.3, "high": 0.2}
 NUM_EMERGENCY_EVENTS = 3    
 

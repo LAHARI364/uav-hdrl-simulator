@@ -1,6 +1,8 @@
 import numpy as np
 from tasks.task import Task
-from configs.config import (MAP_WIDTH, MAP_HEIGHT, TASK_ARRIVAL_RATE, PRIORITY_DISTRIBUTION, NUM_EMERGENCY_EVENTS, TOTAL_SIM_TIME)
+from configs.config import (MAP_WIDTH, MAP_HEIGHT, TASK_ARRIVAL_RATE, PRIORITY_DISTRIBUTION, NUM_EMERGENCY_EVENTS, TOTAL_SIM_TIME, REGION_WORKLOAD,
+    WORKLOAD_TO_LAMBDA)
+
 
 class TaskGenerator:
     def __init__(self):
@@ -16,26 +18,55 @@ class TaskGenerator:
         new_tasks = []
 
         # Normal tasks via Poisson
-        num_tasks = np.random.poisson(TASK_ARRIVAL_RATE * dt)
-        for _ in range(num_tasks):
-            task = self._create_task(current_time, task_type="normal")
-            new_tasks.append(task)
+        for region_id, workload in REGION_WORKLOAD.items():
+
+          lam = WORKLOAD_TO_LAMBDA[workload]
+
+          num_tasks = np.random.poisson(lam * dt)
+          print(
+                f"Region {region_id} "
+                f"({workload}) generated "
+                f"{num_tasks} tasks"
+            )
+
+          for _ in range(num_tasks):
+                task = self._create_task(
+                    current_time,
+                    region_id,
+                    task_type="normal"
+                )
+                new_tasks.append(task)
 
         # Emergency tasks at pre-scheduled times
         for etime in self.emergency_times[:]:
             if abs(current_time - etime) < dt:
-                task = self._create_task(current_time, task_type="emergency")
+                task = self._create_task(current_time, region_id, task_type="emergency")
                 new_tasks.append(task)
                 self.emergency_times.remove(etime)
-
+        print("Inside generator:", len(new_tasks))
         return new_tasks
 
-    def _create_task(self, current_time, task_type="normal"):
+    def _create_task(self, current_time,region_id, task_type="normal"):
         self.task_counter += 1
 
         # Random location anywhere on map
-        x = np.random.uniform(0, MAP_WIDTH)
-        y = np.random.uniform(0, MAP_HEIGHT)
+        rows = 4
+        cols = 4
+
+        region_width = MAP_WIDTH / cols
+        region_height = MAP_HEIGHT / rows
+
+        row = region_id // cols
+        col = region_id % cols
+
+        xmin = col * region_width
+        xmax = xmin + region_width
+
+        ymin = row * region_height
+        ymax = ymin + region_height
+
+        x = np.random.uniform(xmin, xmax)
+        y = np.random.uniform(ymin, ymax)
 
         if task_type == "emergency":
             priority = "emergency"
