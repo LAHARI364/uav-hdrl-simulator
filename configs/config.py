@@ -13,8 +13,6 @@ BATTERY_CRITICAL = 10
 BATTERY_EMERGENCY = 5
 
 
-
-
 # Workload per region 
 REGION_WORKLOAD = {
     0:  "LOW",
