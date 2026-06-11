@@ -12,9 +12,6 @@ BATTERY_WARNING = 20
 BATTERY_CRITICAL = 10
 BATTERY_EMERGENCY = 5
 
-# configs/config.py
-
-
 
 # Workload per region 
 REGION_WORKLOAD = {
