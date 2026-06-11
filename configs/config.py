@@ -18,18 +18,18 @@ REGION_WORKLOAD = {
     0:  "LOW",
     1:  "HIGH",
     2:  "MEDIUM",
-    3:  "CRITICAL",
+    3:  "HIGH",
     4:  "LOW",
     5:  "MEDIUM",
     6:  "HIGH",
     7:  "LOW",
-    8:  "CRITICAL",
+    8:  "HIGH",
     9:  "MEDIUM",
     10: "HIGH",
     11: "LOW",
     12: "MEDIUM",
     13: "HIGH",
-    14: "CRITICAL",
+    14: "HIGH",
     15: "LOW"
 }
 
