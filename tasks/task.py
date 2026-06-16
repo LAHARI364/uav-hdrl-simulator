@@ -11,6 +11,8 @@ class Task:
         self.assigned_uav = None
         self.arrival_time = 0.0
         self.wait_time = 0.0
+        self.region_id = None          # filled in by Map.register_task_to_region()
+        self.numeric_priority = 0.0   # filled in by priority_engine
 
     def __repr__(self):
         return f"Task({self.task_id}) | Priority: {self.priority} | Status: {self.status} | Type: {self.task_type}"
