@@ -71,11 +71,11 @@ class TaskGenerator:
         if task_type == "emergency":
             priority = "emergency"
             deadline = np.random.uniform(5, 15)
-            cpu_cycles = np.random.uniform(1e6, 5e6)
+            cpu_cycles = np.random.uniform(1e9, 5e9)
         else:
             priority = self._sample_priority()
             deadline = np.random.uniform(10, 60)
-            cpu_cycles = np.random.uniform(1e5, 1e6)
+            cpu_cycles = np.random.uniform(1e8, 1e9)
 
         data_size = np.random.uniform(0.5, 5.0)  # MB
 

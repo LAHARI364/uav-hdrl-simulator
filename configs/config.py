@@ -9,9 +9,9 @@ MAX_STORM_CELLS         = 5
 MAP_WIDTH = 10000       # meters
 MAP_HEIGHT = 10000      # meters
 GRID_DIVISIONS = 4 #16 SUBREGIONS
-NUM_UAVS = 10 #CAN CHANGE THI
+NUM_UAVS = 10 #CAN CHANGE THIS
 MAX_BATTERY = 100.0 #100% FLOAT SO WE CAN GET IN POINTS
-
+UAV_CPU_GHZ = 0.5  # 500 MHz — realistic for a small drone
 
 #BATTER THRESHOLD
 BATTERY_FULL = 95
@@ -50,7 +50,8 @@ UAV_COST = 1.0              # cost factor
 WORKLOAD_TO_LAMBDA = {
     "LOW": 2,
     "MEDIUM": 5,
-    "HIGH": 10
+    "HIGH": 10,
+    "CRITICAL": 15
 }
 
 TASK_ARRIVAL_RATE = {
@@ -62,7 +63,7 @@ NUM_EMERGENCY_EVENTS = 3
 
 #Charging Stations
 NUM_CHARGING_STATIONS = 4
-CHARGING_STATION_REGIONS = [0, 1, 2, 3]  
+CHARGING_STATION_REGIONS = [0, 6, 10, 15]  
 CHARGING_RATE = 10.0        # % per second
 
 #Simulation Settings
@@ -76,7 +77,7 @@ BANDWIDTH_HZ       = 10e6      # 10 MHz channel bandwidth
 TRANSMIT_POWER_W   = 0.1       # UAV transmit power in Watts
 NOISE_POWER_W      = 1e-10     # Thermal noise power
 PATH_LOSS_EXPONENT = 2.5       # Free-space path loss exponent
-COMM_RANGE         = 2000.0    # Max communication range in meters
+COMM_RANGE         = 5000.0    # Max communication range in meters
 
 # ─── MEC Offloading (Phase 10) ────────────────────────────────────────────────
 MEC_CPU_FREQUENCY  = 10e9      # MEC server CPU: 10 GHz

@@ -1,7 +1,7 @@
 import numpy as np
 from configs.config import (
     MAX_BATTERY, MAX_SPEED, BATTERY_WARNING, BATTERY_CRITICAL,
-    BATTERY_EMERGENCY, BATTERY_FULL, BATTERY_NORMAL
+    BATTERY_EMERGENCY, BATTERY_FULL, BATTERY_NORMAL, UAV_CPU_GHZ
 )
 from power.battery_engine import update_soc
 
@@ -21,7 +21,7 @@ class UAV:
         self.last_power_breakdown = {}  # set after each drain_battery() call (Phase 5)
 
         # capability
-        self.cpu_capacity = 1.0            # GHz
+        self.cpu_capacity = UAV_CPU_GHZ            # GHz
         self.cpu_utilization = 0.0         # fraction [0,1] of cpu_capacity in use (Phase 5)
         self.communication_range = 500.0   # meters
         self.is_communicating = False      # True while an active CommLink is open (Phase 5)
