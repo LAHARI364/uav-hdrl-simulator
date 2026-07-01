@@ -23,11 +23,11 @@ class TaskGenerator:
           lam = WORKLOAD_TO_LAMBDA[workload]
 
           num_tasks = np.random.poisson(lam * dt)
-          print(
-                f"Region {region_id} "
-                f"({workload}) generated "
-                f"{num_tasks} tasks"
-            )
+        #   print(
+        #         f"Region {region_id} "
+        #         f"({workload}) generated "
+        #         f"{num_tasks} tasks"
+        #     )
 
           for _ in range(num_tasks):
                 task = self._create_task(
@@ -43,7 +43,7 @@ class TaskGenerator:
                 task = self._create_task(current_time, region_id, task_type="emergency")
                 new_tasks.append(task)
                 self.emergency_times.remove(etime)
-        print("Inside generator:", len(new_tasks))
+        # print("Inside generator:", len(new_tasks))
         return new_tasks
 
     def _create_task(self, current_time,region_id, task_type="normal"):
@@ -69,13 +69,15 @@ class TaskGenerator:
         y = np.random.uniform(ymin, ymax)
 
         if task_type == "emergency":
+            x = np.random.uniform(0, MAP_WIDTH)
+            y = np.random.uniform(0, MAP_HEIGHT)
             priority = "emergency"
             deadline = np.random.uniform(5, 15)
-            cpu_cycles = np.random.uniform(1e9, 5e9)
+            cpu_cycles = np.random.uniform(1e8, 5e8)
         else:
             priority = self._sample_priority()
             deadline = np.random.uniform(10, 60)
-            cpu_cycles = np.random.uniform(1e8, 1e9)
+            cpu_cycles = np.random.uniform(1e7, 1e8)
 
         data_size = np.random.uniform(0.5, 5.0)  # MB
 

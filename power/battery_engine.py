@@ -1,14 +1,4 @@
-"""
-Phase 5 — Non-Linear Battery Engine
 
-Power_consumed = P_hover + P_movement + P_CPU + P_communication
-SOC(t+Δt) = SOC(t) - (Power_consumed(t) × Δt) / Capacity
-
-Non-linearity comes from:
-  1) movement power scaling with speed^3 (aerodynamic drag), not just speed
-  2) discharge efficiency dropping at low SOC and with battery degradation
-     (voltage sag), so the SAME wattage drains more % near empty
-"""
 
 import numpy as np
 from configs.config import (
@@ -16,6 +6,7 @@ from configs.config import (
     DRAG_CUBIC_COEFF, CPU_POWER_PER_GHZ_W, COMM_BASE_POWER_W,
     VOLTAGE_SAG_COEFF, FLIGHT_MODE_POWER_PROFILE
 )
+
 
 
 def _profile(mode):
@@ -66,12 +57,10 @@ def discharge_efficiency(soc_percent, battery_health):
     return max(efficiency, 0.05)   # floor to avoid division blow-up
 
 
-def update_soc(uav, dt):
-    """
-    Runs one SOC update step for a UAV.
-    Returns (new_soc, power_breakdown_dict).
-    """
+def update_soc(uav, dt, weather_factor=1.0):
+    
     power_consumed, breakdown = compute_total_power(uav)
+    power_consumed  = power_consumed * (1.0 + (1.0 - weather_factor) * 0.3)
     efficiency       = discharge_efficiency(uav.battery_soc, uav.battery_health)
     effective_power  = power_consumed / efficiency
 

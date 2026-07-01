@@ -60,14 +60,8 @@ class UAV:
         }
         return modes.get(self.flight_mode, MAX_SPEED)
 
-    def drain_battery(self, dt):
-        """
-        Phase 5 — Non-Linear Battery Engine.
-        Delegates the power model + SOC update to power/battery_engine.py
-        so battery physics can be tuned without touching the UAV class.
-        Returns (new_soc, power_breakdown_dict).
-        """
-        new_soc, breakdown = update_soc(self, dt)
+    def drain_battery(self, dt, weather_factor=1.0):
+        new_soc, breakdown = update_soc(self, dt, weather_factor)
         self.last_power_breakdown = breakdown
         self.update_battery_state()
         return new_soc, breakdown
