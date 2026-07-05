@@ -64,10 +64,17 @@ NUM_EMERGENCY_EVENTS = 3
 #Charging Stations
 NUM_CHARGING_STATIONS = 4
 CHARGING_STATION_REGIONS = [0, 6, 10, 15]  
-CHARGING_RATE = 10.0        # % per second
+CHARGING_RATE = 4.0        # % per second
+# Charging load-balancing — max UAVs allowed en-route/charging at one
+# station before others get redirected to the next-closest free station
+CHARGING_STATION_CAPACITY = 4
 
 #Simulation Settings
 TOTAL_SIM_TIME = 300        # seconds
+# Weather playback speed — compress the full historical storm timeline
+# (95 hrs / 342000s in historical_storm.csv) into the simulation window
+STORM_DURATION_S = 342000.0        # last timestamp in historical_storm.csv
+WEATHER_SPEEDUP = STORM_DURATION_S / TOTAL_SIM_TIME   # ≈ 1140×
 TIMESTEP = 0.1 #TIME STEP IN SECONDS
 
 VIZ_SPEED = 1.0             # 1.0 = realtime, 2.0 = 2x faster

@@ -94,7 +94,10 @@ class SimVisualizer:
 
             # Brighten based on congestion
             brightness = 1.0 + r.congestion * 1.5
-            color = tuple(min(int(c * brightness), 255) for c in base_color)
+            # NEW — congestion brightens, weather adds a blue/rain tint
+            color = list(min(int(c * brightness), 255) for c in base_color)
+            color[2] = min(color[2] + int(r.weather_severity * 80), 255)
+            color = tuple(color)
             pygame.draw.rect(self.screen, color, (sx, sy, pw, ph))
 
             # Region label
@@ -198,6 +201,8 @@ class SimVisualizer:
 
         write("UAV SIMULATOR", C_UAV_FULL, self.font_l)
         write(f"Time: {self.sim_time:.1f}s")
+        avg_weather = sum(r.weather_severity for r in self.world.regions) / len(self.world.regions)
+        write(f"Weather: {avg_weather:.2f}", C_TEXT if avg_weather < 0.5 else C_TASK_EMERG)
         y += 6
 
         # UAV list

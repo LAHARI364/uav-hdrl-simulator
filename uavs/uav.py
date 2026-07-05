@@ -19,6 +19,8 @@ class UAV:
         self.battery_health = 1.0       # Degradation factor (1.0 = new, 0.0 = unusable)
         self.battery_status = "FULL"    # FSM STATE
         self.last_power_breakdown = {}  # set after each drain_battery() call (Phase 5)
+        self.is_charging = False    # True from the moment it heads to a station
+        self.target_station = None  # locked-in station while charging
 
         # capability
         self.cpu_capacity = UAV_CPU_GHZ            # GHz
