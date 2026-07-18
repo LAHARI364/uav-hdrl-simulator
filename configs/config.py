@@ -1,120 +1,105 @@
-#Temporal Weather Evolution 
-WEATHER_DECAY_FACTOR    = 0.95    # per-second intensity decay for storm cells
-WEATHER_SIGMA           = 3000.0  # spatial decay constant, meters (radial gradient)
-WEATHER_MAX_INTENSITY   = 1.0
-WEATHER_NOISE_SCALE     = 0.0008  # spatial frequency of ambient Perlin noise
-WEATHER_TIME_SCALE      = 0.05    # how fast ambient noise drifts over time
-STORM_SPAWN_PROBABILITY = 0.02    # chance per tick that a new storm forms
-MAX_STORM_CELLS         = 5
-MAP_WIDTH = 10000       # meters
-MAP_HEIGHT = 10000      # meters
-GRID_DIVISIONS = 4 #16 SUBREGIONS
-NUM_UAVS = 20 #CAN CHANGE THIS
-MAX_BATTERY = 100.0 #100% FLOAT SO WE CAN GET IN POINTS
-UAV_CPU_GHZ = 0.5  # 500 MHz — realistic for a small drone
 
-#BATTER THRESHOLD
-BATTERY_FULL = 95
-BATTERY_NORMAL = 50
-BATTERY_WARNING = 20
-BATTERY_CRITICAL = 10
-BATTERY_EMERGENCY = 5
+MAP_WIDTH = 4000          # meters (4km) -- scaled down from 10000 (10km)
+MAP_HEIGHT = 4000         # meters (4km)
+GRID_DIVISIONS = 2        # creates 2x2 = 4 subregions (scaled down from 4x4=16)
+MAX_TASKS_PER_REGION = 6 
 
 
-# Workload per region 
-REGION_WORKLOAD = {
-    0:  "LOW",
-    1:  "HIGH",
-    2:  "MEDIUM",
-    3:  "HIGH",
-    4:  "LOW",
-    5:  "MEDIUM",
-    6:  "HIGH",
-    7:  "LOW",
-    8:  "HIGH",
-    9:  "MEDIUM",
-    10: "HIGH",
-    11: "LOW",
-    12: "MEDIUM",
-    13: "HIGH",
-    14: "HIGH",
-    15: "LOW"
+NUM_UAVS = 1               # scaled down from 20 -- this is the single-UAV demo
+MAX_BATTERY = 100.0        # SOC starts at 100%
+MAX_SPEED = 100.0          # m/s, maximum UAV speed
+UAV_CPU_GHZ = 0.5          # UAV onboard CPU (500 MHz, small drone)
+
+BATTERY_FULL = 95.0        # freshly charged
+BATTERY_NORMAL = 50.0      # operating normally
+BATTERY_WARNING = 20.0     # start going to charge
+BATTERY_CRITICAL = 10.0    # drop task, rush to station
+BATTERY_EMERGENCY = 5.0    # emergency descent
+
+
+BATTERY_CAPACITY_WH = 60.0        # total energy in Watt-hours
+HOVER_BASE_POWER_W = 30.0         # power just to stay airborne
+DRAG_LINEAR_COEFF = 0.3           # linear drag with speed
+DRAG_CUBIC_COEFF = 0.0002         # non-linear drag (faster = much more drain)
+CPU_POWER_PER_GHZ_W = 5.0         # power per GHz of CPU used
+COMM_BASE_POWER_W = 8.0           # power when transmitting
+VOLTAGE_SAG_COEFF = 0.25          # discharge efficiency sag as SOC drops
+
+# Flight-mode power/speed coefficients
+FLIGHT_MODE_PROFILE = {
+    "CRUISE":            {"speed": 100.0, "hover_coeff": 1.0, "cpu_coeff": 1.0, "comm_coeff": 1.0},
+    "ECO":               {"speed": 50.0,  "hover_coeff": 0.7, "cpu_coeff": 0.8, "comm_coeff": 1.0},
+    "HOVER":             {"speed": 0.0,   "hover_coeff": 1.2, "cpu_coeff": 1.0, "comm_coeff": 1.0},
+    "HIGH_SPEED":        {"speed": 100.0, "hover_coeff": 1.3, "cpu_coeff": 1.0, "comm_coeff": 1.0},
+    "EMERGENCY_DESCENT": {"speed": 30.0,  "hover_coeff": 0.5, "cpu_coeff": 0.5, "comm_coeff": 0.5},
 }
 
 
-
-MAX_SPEED = 100.0            # m/s
-UAV_COST = 1.0              # cost factor
-
-#Task Settings
+# Scaled down to ~1/5 of the full-sim lambdas (see module docstring).
 WORKLOAD_TO_LAMBDA = {
-    "LOW": 0.05,
-    "MEDIUM": 0.1,
-    "HIGH": 0.2,
-    "CRITICAL": 0.3
+    "LOW": 0.01,
+    "MEDIUM": 0.02,
+    "HIGH": 0.04,
+    "CRITICAL": 0.06,
 }
 
-TASK_ARRIVAL_RATE = {
-    region: WORKLOAD_TO_LAMBDA[state]
-    for region, state in REGION_WORKLOAD.items()
-}    
-PRIORITY_DISTRIBUTION = {"low": 0.5, "medium": 0.3, "high": 0.2}
-NUM_EMERGENCY_EVENTS = 3    
-
-#Charging Stations
-NUM_CHARGING_STATIONS = 4
-CHARGING_STATION_REGIONS = [0, 6, 10, 15]  
-CHARGING_RATE = 4.0        # % per second
-# Charging load-balancing — max UAVs allowed en-route/charging at one
-# station before others get redirected to the next-closest free station
-CHARGING_STATION_CAPACITY = 4
-
-#Simulation Settings
-TOTAL_SIM_TIME = 300        # seconds
-# Weather playback speed — compress the full historical storm timeline
-# (95 hrs / 342000s in historical_storm.csv) into the simulation window
-STORM_DURATION_S = 342000.0        # last timestamp in historical_storm.csv
-WEATHER_SPEEDUP = STORM_DURATION_S / TOTAL_SIM_TIME   # ≈ 1140×
-TIMESTEP = 0.1 #TIME STEP IN SECONDS
-
-VIZ_SPEED = 1.0             # 1.0 = realtime, 2.0 = 2x faster
-
-# Communication Engine 
-BANDWIDTH_HZ       = 10e6      # 10 MHz channel bandwidth
-TRANSMIT_POWER_W   = 0.1       # UAV transmit power in Watts
-NOISE_POWER_W      = 1e-10     # Thermal noise power
-PATH_LOSS_EXPONENT = 2.5       # Free-space path loss exponent
-COMM_RANGE         = 5000.0    # Max communication range in meters
-
-# MEC Offloading 
-MEC_CPU_FREQUENCY  = 10e9      # MEC server CPU: 10 GHz
-MEC_QUEUE_DELAY    = 0.05      # Fixed queue delay in seconds
-DOWNLOAD_RATE_MBPS = 50.0      # Download rate from MEC to UAV in MB/s
-
-#Dynamic Priority Weights 
-W1_DEADLINE    = 0.35
-W2_BATTERY     = 0.20
-W3_WEATHER     = 0.15
-W4_QUEUE       = 0.15
-W5_IMPORTANCE  = 0.15
-
-#Congestion & Region Tracking 
-CONGESTION_DECAY   = 0.99      # Congestion decays per timestep (exponential)
-MAX_TASKS_PER_REGION = 20      # For normalisation
-# Non-Linear Battery Engine 
-BATTERY_CAPACITY_WH   = 60.0    # total battery energy capacity, Watt-hours
-HOVER_BASE_POWER_W    = 50.0   # power just to stay airborne, no horizontal motion
-DRAG_LINEAR_COEFF     = 0.5     # linear drag term coefficient
-DRAG_CUBIC_COEFF      = 0.0005   # cubic drag term coefficient (non-linear w.r.t. speed)
-CPU_POWER_PER_GHZ_W   = 5.0     # watts consumed per GHz of CPU utilised
-COMM_BASE_POWER_W     = 8.0     # watts consumed while actively transmitting
-VOLTAGE_SAG_COEFF     = 0.25    # how much efficiency drops as SOC nears 0
-
-# Power level profile per flight mode — multiplies each power component
-FLIGHT_MODE_POWER_PROFILE = {
-    "CRUISE":            {"power_level": "MEDIUM",   "hover_coeff": 1.0, "movement_coeff": 1.0, "cpu_coeff": 1.0, "comm_coeff": 1.0},
-    "HOVER":             {"power_level": "LOW",      "hover_coeff": 1.0, "movement_coeff": 0.0, "cpu_coeff": 0.8, "comm_coeff": 1.0},
-    "HIGH_SPEED":        {"power_level": "HIGH",     "hover_coeff": 1.1, "movement_coeff": 2.0, "cpu_coeff": 1.2, "comm_coeff": 1.0},
-    "ECO":               {"power_level": "VERY_LOW", "hover_coeff": 0.6, "movement_coeff": 0.6, "cpu_coeff": 0.5, "comm_coeff": 0.7},
-    "EMERGENCY_DESCENT": {"power_level": "HIGH",     "hover_coeff": 1.2, "movement_coeff": 1.5, "cpu_coeff": 1.0, "comm_coeff": 1.0},
+WORKLOAD_WEIGHTS = {
+    "LOW": 1,
+    "MEDIUM": 2,
+    "HIGH": 4,
+    "CRITICAL": 6,
 }
+
+PRIORITY_DISTRIBUTION = {
+    "low": 0.5,
+    "medium": 0.3,
+    "high": 0.2,
+}
+
+NUM_EMERGENCY_EVENTS = 1   # scaled down from 3
+
+# Priority engine weights (unchanged -- these describe scoring logic, not scale)
+PRIORITY_WEIGHTS = {
+    "deadline": 0.35,
+    "battery": 0.20,
+    "weather": 0.15,
+    "queue": 0.15,
+    "importance": 0.15,
+}
+IMPORTANCE_BASE = {
+    "low": 0.2,
+    "medium": 0.5,
+    "high": 0.8,
+    "emergency": 1.0,
+}
+
+# Task cpu_cycles / deadline / data_size ranges
+NORMAL_CPU_CYCLES_RANGE = (1e7, 1e8)
+EMERGENCY_CPU_CYCLES_RANGE = (1e8, 5e8)
+NORMAL_DEADLINE_RANGE = (20.0, 60.0)     # seconds
+EMERGENCY_DEADLINE_RANGE = (8.0, 20.0)   # seconds, shorter for emergencies
+NORMAL_DATA_SIZE_RANGE = (0.5, 5.0)      # MB
+EMERGENCY_DATA_SIZE_RANGE = (2.0, 10.0)  # MB
+
+# Scaled down from 4 stations at [0, 6, 10, 15] (corners of a 4x4 grid)
+# to 1 station at region 0 (a single corner of the 2x2 grid).
+NUM_CHARGING_STATIONS = 1
+CHARGING_STATION_REGIONS = [0]
+CHARGING_RATE = 10.0        # % per second, unchanged (per-station hardware)
+COMM_RANGE = 2500.0         # meters, trimmed from 5000m (see module docstring)
+MEC_CPU_FREQUENCY = 10.0    # GHz, unchanged (server hardware doesn't scale down)
+MEC_QUEUE_DELAY = 0.05      # seconds, base queueing delay at MEC server
+DOWNLOAD_RATE_MBPS = 20.0   # MB/s, result download rate from MEC
+BANDWIDTH_HZ = 10e6         # 10 MHz channel bandwidth
+TX_POWER_W = 0.5            # UAV transmit power for SNR calc
+NOISE_POWER_W = 1e-9        # channel noise floor for SNR calc
+
+
+TOTAL_SIM_TIME = 200.0      # seconds -- slightly shorter demo run
+TIMESTEP = 0.1              # seconds per tick
+VIZ_SPEED = 1.0              # 1.0 = realtime, 2.0 = 2x faster
+
+# Derived: auto-generate TASK_ARRIVAL_RATE per region_id from workload.
+# Filled in by environment/map.py once regions are created (region_id -> lambda),
+# but we pre-seed a flat mapping here keyed by workload label for convenience.
+TASK_ARRIVAL_RATE = {}  # populated at runtime: {region_id: lambda_value}

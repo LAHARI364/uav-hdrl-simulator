@@ -1,72 +1,57 @@
 
-
 import numpy as np
-from configs.config import (
-    BATTERY_CAPACITY_WH, HOVER_BASE_POWER_W, DRAG_LINEAR_COEFF,
-    DRAG_CUBIC_COEFF, CPU_POWER_PER_GHZ_W, COMM_BASE_POWER_W,
-    VOLTAGE_SAG_COEFF, FLIGHT_MODE_POWER_PROFILE
-)
-
-
-
-def _profile(mode):
-    return FLIGHT_MODE_POWER_PROFILE.get(mode, FLIGHT_MODE_POWER_PROFILE["CRUISE"])
-
-
-def compute_power_hover(mode):
-    return HOVER_BASE_POWER_W * _profile(mode)["hover_coeff"]
-
-
-def compute_power_movement(speed, mode):
-    """Non-linear: linear drag term + cubic drag term."""
-    base = DRAG_LINEAR_COEFF * speed + DRAG_CUBIC_COEFF * (speed ** 3)
-    return base * _profile(mode)["movement_coeff"]
-
-
-def compute_power_cpu(uav, mode):
-    utilisation = getattr(uav, "cpu_utilization", 0.0)
-    return CPU_POWER_PER_GHZ_W * uav.cpu_capacity * utilisation * _profile(mode)["cpu_coeff"]
-
-
-def compute_power_communication(uav, mode):
-    active = 1.0 if getattr(uav, "is_communicating", False) else 0.0
-    return COMM_BASE_POWER_W * active * _profile(mode)["comm_coeff"]
+from configs import config
 
 
 def compute_total_power(uav):
-    speed = np.linalg.norm(uav.velocity)
-    mode  = uav.flight_mode
+    profile = config.FLIGHT_MODE_PROFILE.get(uav.flight_mode, config.FLIGHT_MODE_PROFILE["CRUISE"])
 
-    p_hover = compute_power_hover(mode)
-    p_move  = compute_power_movement(speed, mode)
-    p_cpu   = compute_power_cpu(uav, mode)
-    p_comm  = compute_power_communication(uav, mode)
+    p_hover = config.HOVER_BASE_POWER_W * profile["hover_coeff"]
 
-    total = p_hover + p_move + p_cpu + p_comm
-    return total, {"hover": p_hover, "movement": p_move, "cpu": p_cpu, "comm": p_comm}
+    speed = float(np.linalg.norm(uav.velocity))
+    p_move = config.DRAG_LINEAR_COEFF * speed + config.DRAG_CUBIC_COEFF * (speed ** 3)
+
+    p_cpu = (
+        config.CPU_POWER_PER_GHZ_W
+        * uav.cpu_capacity
+        * uav.cpu_utilization
+        * profile["cpu_coeff"]
+    )
+
+    p_comm = config.COMM_BASE_POWER_W * profile["comm_coeff"] if uav.is_communicating else 0.0
+
+    total_power = p_hover + p_move + p_cpu + p_comm
+    breakdown = {
+        "hover": p_hover,
+        "movement": p_move,
+        "cpu": p_cpu,
+        "comm": p_comm,
+        "total": total_power,
+    }
+    return total_power, breakdown
 
 
-def discharge_efficiency(soc_percent, battery_health):
-    """
-    Non-linear voltage sag: as SOC drops, internal resistance rises,
-    so the battery needs to push more effective power to deliver the
-    same usable power. Degraded health (battery_health < 1.0) compounds this.
-    """
-    sag = VOLTAGE_SAG_COEFF * (1.0 - soc_percent / 100.0)
-    efficiency = (1.0 - sag) * battery_health
-    return max(efficiency, 0.05)   # floor to avoid division blow-up
+def discharge_efficiency(soc, health):
+    efficiency = 1.0 - config.VOLTAGE_SAG_COEFF * (1.0 - soc / 100.0) / max(health, 1e-6)
+    return max(efficiency, 0.5)
 
 
 def update_soc(uav, dt, weather_factor=1.0):
-    
-    power_consumed, breakdown = compute_total_power(uav)
-    power_consumed  = power_consumed * (1.0 + (1.0 - weather_factor) * 0.3)
-    efficiency       = discharge_efficiency(uav.battery_soc, uav.battery_health)
-    effective_power  = power_consumed / efficiency
+    total_power, breakdown = compute_total_power(uav)
 
-    energy_wh   = effective_power * dt / 3600.0           # W·s → Wh
-    capacity_wh = BATTERY_CAPACITY_WH * uav.battery_health
-    delta_soc   = (energy_wh / capacity_wh) * 100.0
+    # Bad weather (weather_factor -> 0 means bad) increases drain by up to 30%.
+    weather_penalty = 1.0 + 0.3 * (1.0 - weather_factor)
+    effective_power = total_power * weather_penalty
 
-    uav.battery_soc = max(0.0, uav.battery_soc - delta_soc)
-    return uav.battery_soc, breakdown
+    efficiency = discharge_efficiency(uav.battery_soc, uav.battery_health)
+    effective_power = effective_power / efficiency
+
+    # W * s -> Wh -> percentage of BATTERY_CAPACITY_WH
+    energy_wh = effective_power * dt / 3600.0
+    pct_drain = (energy_wh / config.BATTERY_CAPACITY_WH) * 100.0
+
+    new_soc = max(uav.battery_soc - pct_drain, 0.0)
+    breakdown["weather_penalty"] = weather_penalty
+    breakdown["efficiency"] = efficiency
+    breakdown["pct_drain"] = pct_drain
+    return new_soc, breakdown

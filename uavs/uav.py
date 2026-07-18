@@ -1,88 +1,85 @@
+
 import numpy as np
-from configs.config import (
-    MAX_BATTERY, MAX_SPEED, BATTERY_WARNING, BATTERY_CRITICAL,
-    BATTERY_EMERGENCY, BATTERY_FULL, BATTERY_NORMAL, UAV_CPU_GHZ
-)
-from power.battery_engine import update_soc
+from configs import config
+from power import battery_engine
 
 
 class UAV:
     def __init__(self, uav_id, position):
         self.id = uav_id
-        self.position = np.array(position, dtype=float)
-        self.velocity = np.zeros(3)
-        self.acceleration = np.zeros(3)
-        self.max_speed = MAX_SPEED
+        self.position = np.array(position, dtype=float)          # [x, y, z]
+        self.velocity = np.zeros(3, dtype=float)
+        self.acceleration = np.zeros(3, dtype=float)
+        self.max_speed = config.MAX_SPEED
 
-        # battery
-        self.battery_soc = 100.0        # State of Charge in percentage
-        self.battery_health = 1.0       # Degradation factor (1.0 = new, 0.0 = unusable)
-        self.battery_status = "FULL"    # FSM STATE
-        self.last_power_breakdown = {}  # set after each drain_battery() call (Phase 5)
-        self.is_charging = False    # True from the moment it heads to a station
-        self.target_station = None  # locked-in station while charging
+        self.battery_soc = config.MAX_BATTERY
+        self.battery_health = 1.0
+        self.battery_status = "FULL"
 
-        # capability
-        self.cpu_capacity = UAV_CPU_GHZ            # GHz
-        self.cpu_utilization = 0.0         # fraction [0,1] of cpu_capacity in use (Phase 5)
-        self.communication_range = 500.0   # meters
-        self.is_communicating = False      # True while an active CommLink is open (Phase 5)
-        self.flight_mode = "CRUISE"  # CRUISE, ECO, HOVER, HIGH_SPEED, EMERGENCY_DESCENT
+        self.cpu_capacity = config.UAV_CPU_GHZ
+        self.cpu_utilization = 0.0
+        self.is_communicating = False
+        self.communication_range = config.COMM_RANGE
 
-        # tasks
+        self.flight_mode = "CRUISE"
         self.task_queue = []
         self.current_task = None
         self.current_region = None
+        self.last_power_breakdown = {}
+        self.compute_timer = 0.0
 
+    # ------------------------------------------------------------------
+    # Movement
+    # ------------------------------------------------------------------
     def update_position(self, dt):
+        self.velocity += self.acceleration * dt
         speed = np.linalg.norm(self.velocity)
         if speed > self.max_speed:
-            self.velocity = (self.velocity / speed) * self.max_speed
-        self.velocity += self.acceleration * dt
+            self.velocity = self.velocity / speed * self.max_speed
         self.position += self.velocity * dt
 
     def move_towards(self, target, dt):
         target = np.array(target, dtype=float)
+        if target.shape[0] < 3:
+            target = np.append(target, [0.0] * (3 - target.shape[0]))
         direction = target - self.position
         distance = np.linalg.norm(direction)
-        if distance < 1.0:
+        if distance < 1e-6:
+            self.velocity[:] = 0.0
             return
-        direction /= distance
-        speed = self._get_speed_by_mood()
-        self.velocity = direction * speed
+        direction_unit = direction / distance
+        speed = self._get_speed_by_mode()
+        self.velocity = direction_unit * speed
         self.update_position(dt)
 
-    def _get_speed_by_mood(self):
-        modes = {
-            "CRUISE": MAX_SPEED,
-            "ECO": MAX_SPEED * 0.5,
-            "HOVER": 0.0,
-            "HIGH_SPEED": MAX_SPEED * 1.5,
-            "EMERGENCY_DESCENT": MAX_SPEED * 0.3
-        }
-        return modes.get(self.flight_mode, MAX_SPEED)
+    def _get_speed_by_mode(self):
+        profile = config.FLIGHT_MODE_PROFILE.get(self.flight_mode, config.FLIGHT_MODE_PROFILE["CRUISE"])
+        return profile["speed"]
 
+    # ------------------------------------------------------------------
+    # Battery
+    # ------------------------------------------------------------------
     def drain_battery(self, dt, weather_factor=1.0):
-        new_soc, breakdown = update_soc(self, dt, weather_factor)
+        new_soc, breakdown = battery_engine.update_soc(self, dt, weather_factor)
+        self.battery_soc = new_soc
         self.last_power_breakdown = breakdown
         self.update_battery_state()
-        return new_soc, breakdown
 
     def update_battery_state(self):
         soc = self.battery_soc
-        if soc >= BATTERY_FULL:
-            self.battery_status = "FULL"
-        elif soc >= BATTERY_NORMAL:
-            self.battery_status = "NORMAL"
-        elif soc >= BATTERY_WARNING:
-            self.battery_status = "WARNING"
-        elif soc >= BATTERY_CRITICAL:
+        if soc <= config.BATTERY_EMERGENCY:
+            self.battery_status = "EMERGENCY" if soc > 0 else "DEAD"
+        elif soc <= config.BATTERY_CRITICAL:
             self.battery_status = "CRITICAL"
+        elif soc <= config.BATTERY_WARNING:
+            self.battery_status = "WARNING"
+        elif soc <= config.BATTERY_NORMAL:
+            self.battery_status = "NORMAL"
         else:
-            self.battery_status = "EMERGENCY"
+            self.battery_status = "FULL"
 
-    def __repr__(self):
-        return (f"UAV({self.id}) | Pos: {self.position} | "
-                f"SOC: {self.battery_soc:.1f}% | State: {self.battery_status} | "
-                f"Mode: {self.flight_mode}")
-    
+    def distance_to(self, point):
+        point = np.array(point, dtype=float)
+        if point.shape[0] < 3:
+            point = np.append(point, [0.0] * (3 - point.shape[0]))
+        return float(np.linalg.norm(self.position - point))

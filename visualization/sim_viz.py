@@ -1,246 +1,205 @@
-# visualization/sim_viz.py
-
 import pygame
-import numpy as np
-from configs.config import (
-    MAP_WIDTH, MAP_HEIGHT, GRID_DIVISIONS,
-    BATTERY_WARNING, BATTERY_CRITICAL, BATTERY_EMERGENCY
-)
+from configs import config
 
-# ── Screen settings ────────────────────────────────────────────────────────────
-SCREEN_W = 900
-SCREEN_H = 900
-PANEL_W  = 220       # right-side info panel
-TOTAL_W  = SCREEN_W + PANEL_W
+MAP_PIXELS = 900
+PANEL_WIDTH = 260
+WINDOW_WIDTH = MAP_PIXELS + PANEL_WIDTH
+WINDOW_HEIGHT = MAP_PIXELS
 
-# ── Colors ────────────────────────────────────────────────────────────────────
-C_BG          = (10,  12,  20)
-C_GRID        = (30,  35,  55)
-C_REGION_LOW  = (20,  40,  20)
-C_REGION_MED  = (40,  40,  10)
-C_REGION_HIGH = (50,  25,   5)
-C_REGION_CRIT = (60,  10,  10)
-C_UAV_FULL    = (80, 200, 120)
-C_UAV_WARN    = (255,200,  50)
-C_UAV_CRIT    = (255, 80,  50)
-C_TASK_NORMAL = (60, 130, 220)
-C_TASK_HIGH   = (220,150,  30)
-C_TASK_EMERG  = (220,  40,  40)
-C_MEC         = (160,  80, 220)
-C_CHARGE      = (50,  220, 200)
-C_TEXT        = (200, 210, 230)
-C_PANEL_BG    = (15,  18,  30)
-
-WORKLOAD_COLORS = {
-    "LOW":    C_REGION_LOW,
-    "MEDIUM": C_REGION_MED,
-    "HIGH":   C_REGION_HIGH,
-    "CRITICAL": C_REGION_CRIT,
+COLORS = {
+    "background": (18, 18, 24),
+    "panel_bg": (28, 28, 36),
+    "grid_line": (60, 60, 70),
+    "text": (230, 230, 230),
+    "workload_LOW": (60, 140, 70),
+    "workload_MEDIUM": (200, 190, 60),
+    "workload_HIGH": (220, 140, 40),
+    "workload_CRITICAL": (150, 30, 30),
+    "task_normal": (80, 140, 230),
+    "task_high": (230, 150, 40),
+    "task_emergency": (230, 60, 60),
+    "uav_ok": (70, 220, 100),
+    "uav_warning": (230, 210, 60),
+    "uav_critical": (230, 70, 70),
+    "charging_station": (60, 220, 220),
+    "mec_server": (170, 100, 230),
 }
-
-
-def world_to_screen(x, y):
-    """Convert world coordinates to screen pixels."""
-    sx = int((x / MAP_WIDTH)  * SCREEN_W)
-    sy = int((1 - y / MAP_HEIGHT) * SCREEN_H)   # flip Y
-    return sx, sy
 
 
 class SimVisualizer:
     def __init__(self, world, uavs, mec_servers):
         pygame.init()
-        self.screen = pygame.display.set_mode((TOTAL_W, SCREEN_H))
-        pygame.display.set_caption("UAV HDRL Simulator")
-        self.clock  = pygame.time.Clock()
-        self.font_s = pygame.font.SysFont("consolas", 11)
-        self.font_m = pygame.font.SysFont("consolas", 13)
-        self.font_l = pygame.font.SysFont("consolas", 16, bold=True)
-
-        self.world       = world
-        self.uavs        = uavs
+        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+        pygame.display.set_caption("UAV-HDRL Simulator -- Single UAV Demo")
+        self.world = world
+        self.uavs = uavs
         self.mec_servers = mec_servers
-        self.tasks       = []
-        self.sim_time    = 0.0
-        self.running     = True
+        self.clock = pygame.time.Clock()
+        self.running = True
 
-    # ── Main render call ───────────────────────────────────────────────────────
-    def render(self, tasks, sim_time):
-        self.tasks    = tasks
-        self.sim_time = sim_time
+        self.font_small = pygame.font.SysFont("consolas", 13)
+        self.font_medium = pygame.font.SysFont("consolas", 16, bold=True)
+        self.font_large = pygame.font.SysFont("consolas", 20, bold=True)
 
+    def world_to_screen(self, x, y):
+        sx = int((x / config.MAP_WIDTH) * MAP_PIXELS)
+        sy = int(MAP_PIXELS - (y / config.MAP_HEIGHT) * MAP_PIXELS)  # flip Y
+        return sx, sy
+
+    def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self.running = False
 
-        self.screen.fill(C_BG)
+    def render(self, tasks, sim_time):
+        self.handle_events()
+        if not self.running:
+            return
+        self.screen.fill(COLORS["background"])
         self._draw_regions()
         self._draw_grid()
+        self._draw_tasks(tasks)
         self._draw_charging_stations()
         self._draw_mec_servers()
-        self._draw_tasks()
         self._draw_uavs()
-        self._draw_panel()
+        self._draw_panel(tasks, sim_time)
         pygame.display.flip()
 
-    # ── Draw subregions ────────────────────────────────────────────────────────
     def _draw_regions(self):
-        for r in self.world.regions:
-            sx, sy = world_to_screen(r.x_start, r.y_start + r.height)
-            pw = int((r.width  / MAP_WIDTH)  * SCREEN_W)
-            ph = int((r.height / MAP_HEIGHT) * SCREEN_H)
-            base_color = WORKLOAD_COLORS.get(r.workload, C_REGION_LOW)
+        for region in self.world.regions:
+            x0, y0 = self.world_to_screen(region.x_start, region.y_start + region.height)
+            x1, y1 = self.world_to_screen(region.x_start + region.width, region.y_start)
+            base_color = COLORS[f"workload_{region.workload}"]
+            brightness = 1.0 + 0.5 * region.congestion
+            color = tuple(min(int(c * brightness), 255) for c in base_color)
+            rect = pygame.Rect(x0, y0, x1 - x0, y1 - y0)
+            pygame.draw.rect(self.screen, color, rect)
 
-            # Brighten based on congestion
-            brightness = 1.0 + r.congestion * 1.5
-            # NEW — congestion brightens, weather adds a blue/rain tint
-            color = list(min(int(c * brightness), 255) for c in base_color)
-            color[2] = min(color[2] + int(r.weather_severity * 80), 255)
-            color = tuple(color)
-            pygame.draw.rect(self.screen, color, (sx, sy, pw, ph))
+            label = f"R{region.region_id} {region.workload[0]} T:{len(region.active_tasks)}"
+            text_surf = self.font_small.render(label, True, (255, 255, 255))
+            self.screen.blit(text_surf, (x0 + 6, y0 + 6))
 
-            # Region label
-            label = self.font_s.render(
-                f"R{r.region_id} {r.workload[:1]} T:{len(r.active_tasks)}", True, C_TEXT)
-            self.screen.blit(label, (sx + 4, sy + 4))
-
-    # ── Draw grid lines ────────────────────────────────────────────────────────
     def _draw_grid(self):
-        step_x = SCREEN_W // GRID_DIVISIONS
-        step_y = SCREEN_H // GRID_DIVISIONS
-        for i in range(GRID_DIVISIONS + 1):
-            pygame.draw.line(self.screen, C_GRID, (i * step_x, 0), (i * step_x, SCREEN_H))
-            pygame.draw.line(self.screen, C_GRID, (0, i * step_y), (SCREEN_W, i * step_y))
+        divisions = config.GRID_DIVISIONS
+        for i in range(divisions + 1):
+            x = int(i * MAP_PIXELS / divisions)
+            pygame.draw.line(self.screen, COLORS["grid_line"], (x, 0), (x, MAP_PIXELS), 1)
+            y = int(i * MAP_PIXELS / divisions)
+            pygame.draw.line(self.screen, COLORS["grid_line"], (0, y), (MAP_PIXELS, y), 1)
 
-    # ── Draw tasks ────────────────────────────────────────────────────────────
-    def _draw_tasks(self):
-        for t in self.tasks:
-            if t.status not in ("PENDING", "ASSIGNED"):
+    def _draw_tasks(self, tasks):
+        for task in tasks:
+            if task.status not in ("PENDING", "ASSIGNED"):
                 continue
-            sx, sy = world_to_screen(t.location[0], t.location[1])
-            if t.task_type == "emergency":
-                color = C_TASK_EMERG
-                size  = 5
-            elif t.priority == "high":
-                color = C_TASK_HIGH
-                size  = 4
+            x, y = self.world_to_screen(task.location[0], task.location[1])
+            if task.task_type == "emergency":
+                color = COLORS["task_emergency"]
+                radius = 6
+            elif task.priority == "high":
+                color = COLORS["task_high"]
+                radius = 5
             else:
-                color = C_TASK_NORMAL
-                size  = 3
-            pygame.draw.circle(self.screen, color, (sx, sy), size)
+                color = COLORS["task_normal"]
+                radius = 4
+            pygame.draw.circle(self.screen, color, (x, y), radius)
 
-    # ── Draw UAVs ─────────────────────────────────────────────────────────────
     def _draw_uavs(self):
         for uav in self.uavs:
-            sx, sy = world_to_screen(uav.position[0], uav.position[1])
-
-            # Color by battery state
-            if uav.battery_soc > BATTERY_WARNING:
-                color = C_UAV_FULL
-            elif uav.battery_soc > BATTERY_CRITICAL:
-                color = C_UAV_WARN
+            x, y = self.world_to_screen(uav.position[0], uav.position[1])
+            if uav.battery_status in ("FULL", "NORMAL"):
+                color = COLORS["uav_ok"]
+            elif uav.battery_status == "WARNING":
+                color = COLORS["uav_warning"]
             else:
-                color = C_UAV_CRIT
+                color = COLORS["uav_critical"]
 
-            # Draw UAV as triangle
-            tip   = (sx,      sy - 10)
-            left  = (sx - 7,  sy + 6)
-            right = (sx + 7,  sy + 6)
-            pygame.draw.polygon(self.screen, color, [tip, left, right])
-            pygame.draw.polygon(self.screen, C_TEXT, [tip, left, right], 1)
+            points = [(x, y - 10), (x - 8, y + 8), (x + 8, y + 8)]
+            pygame.draw.polygon(self.screen, color, points)
 
             # Battery bar
-            bar_w = 20
-            bar_h = 4
-            fill  = int((uav.battery_soc / 100.0) * bar_w)
-            pygame.draw.rect(self.screen, (60, 60, 60), (sx - 10, sy + 9, bar_w, bar_h))
-            pygame.draw.rect(self.screen, color,        (sx - 10, sy + 9, fill,  bar_h))
+            bar_w = 24
+            fill_w = int(bar_w * uav.battery_soc / 100.0)
+            pygame.draw.rect(self.screen, (80, 80, 80), (x - bar_w // 2, y + 12, bar_w, 4))
+            pygame.draw.rect(self.screen, color, (x - bar_w // 2, y + 12, fill_w, 4))
 
-            # UAV ID
-            label = self.font_s.render(f"U{uav.id}", True, C_TEXT)
-            self.screen.blit(label, (sx - 8, sy + 15))
+            if uav.current_task is not None:
+                tx, ty = self.world_to_screen(*uav.current_task.location)
+                pygame.draw.line(self.screen, (120, 120, 200), (x, y), (tx, ty), 1)
 
-            # Draw line to current task
-            if uav.current_task and uav.current_task.status == "ASSIGNED":
-                tx, ty = world_to_screen(
-                    uav.current_task.location[0],
-                    uav.current_task.location[1]
-                )
-                pygame.draw.line(self.screen, (*color, 80), (sx, sy), (tx, ty), 1)
+            label = self.font_small.render(f"UAV{uav.id}", True, (255, 255, 255))
+            self.screen.blit(label, (x - 12, y + 18))
 
-    # ── Draw charging stations ────────────────────────────────────────────────
     def _draw_charging_stations(self):
         for cs in self.world.charging_stations:
-            sx, sy = world_to_screen(cs["position"][0], cs["position"][1])
-            pygame.draw.rect(self.screen, C_CHARGE, (sx - 6, sy - 6, 12, 12))
-            label = self.font_s.render("C", True, C_BG)
-            self.screen.blit(label, (sx - 4, sy - 5))
+            x, y = self.world_to_screen(cs["position"][0], cs["position"][1])
+            pygame.draw.rect(self.screen, COLORS["charging_station"], (x - 8, y - 8, 16, 16))
+            label = self.font_small.render("C", True, (0, 0, 0))
+            self.screen.blit(label, (x - 4, y - 7))
 
-    # ── Draw MEC servers ──────────────────────────────────────────────────────
     def _draw_mec_servers(self):
-        for mec in self.mec_servers:
-            sx, sy = world_to_screen(mec.position[0], mec.position[1])
-            pygame.draw.circle(self.screen, C_MEC, (sx, sy), 8)
-            pygame.draw.circle(self.screen, C_TEXT, (sx, sy), 8, 1)
-            label = self.font_s.render("M", True, C_BG)
-            self.screen.blit(label, (sx - 4, sy - 5))
+        for server in self.mec_servers:
+            x, y = self.world_to_screen(server.position[0], server.position[1])
+            pygame.draw.circle(self.screen, COLORS["mec_server"], (x, y), 10)
+            label = self.font_small.render("M", True, (0, 0, 0))
+            self.screen.blit(label, (x - 4, y - 7))
 
-    # ── Side panel ────────────────────────────────────────────────────────────
-    def _draw_panel(self):
-        panel_x = SCREEN_W
-        pygame.draw.rect(self.screen, C_PANEL_BG, (panel_x, 0, PANEL_W, SCREEN_H))
-        pygame.draw.line(self.screen, C_GRID, (panel_x, 0), (panel_x, SCREEN_H), 1)
+    def _draw_panel(self, tasks, sim_time):
+        panel_rect = pygame.Rect(MAP_PIXELS, 0, PANEL_WIDTH, WINDOW_HEIGHT)
+        pygame.draw.rect(self.screen, COLORS["panel_bg"], panel_rect)
 
-        y = 10
-        def write(text, color=C_TEXT, font=None):
-            nonlocal y
-            f = font or self.font_m
-            self.screen.blit(f.render(text, True, color), (panel_x + 8, y))
+        y = 16
+        title = self.font_large.render("Single UAV Demo", True, COLORS["text"])
+        self.screen.blit(title, (MAP_PIXELS + 16, y))
+        y += 34
+
+        time_text = self.font_medium.render(f"t = {sim_time:6.1f}s", True, COLORS["text"])
+        self.screen.blit(time_text, (MAP_PIXELS + 16, y))
+        y += 30
+
+        for uav in self.uavs:
+            lines = [
+                f"UAV {uav.id}",
+                f"  SOC: {uav.battery_soc:5.1f}%  [{uav.battery_status}]",
+                f"  Mode: {uav.flight_mode}",
+                f"  Task: {uav.current_task.task_id if uav.current_task else '-'}",
+            ]
+            for line in lines:
+                surf = self.font_small.render(line, True, COLORS["text"])
+                self.screen.blit(surf, (MAP_PIXELS + 16, y))
+                y += 18
+            y += 8
+
+        pending = sum(1 for t in tasks if t.status == "PENDING")
+        assigned = sum(1 for t in tasks if t.status == "ASSIGNED")
+        done = sum(1 for t in tasks if t.status == "DONE")
+        emergency = sum(1 for t in tasks if t.task_type == "emergency")
+
+        y += 8
+        for line in [
+            f"Pending:  {pending}",
+            f"Assigned: {assigned}",
+            f"Done:     {done}",
+            f"Emergency:{emergency}",
+        ]:
+            surf = self.font_small.render(line, True, COLORS["text"])
+            self.screen.blit(surf, (MAP_PIXELS + 16, y))
             y += 18
 
-        write("UAV SIMULATOR", C_UAV_FULL, self.font_l)
-        write(f"Time: {self.sim_time:.1f}s")
-        avg_weather = sum(r.weather_severity for r in self.world.regions) / len(self.world.regions)
-        write(f"Weather: {avg_weather:.2f}", C_TEXT if avg_weather < 0.5 else C_TASK_EMERG)
-        y += 6
-
-        # UAV list
-        write("── UAVs ──", C_GRID)
-        for uav in self.uavs:
-            color = C_UAV_FULL if uav.battery_soc > BATTERY_WARNING else (
-                    C_UAV_WARN if uav.battery_soc > BATTERY_CRITICAL else C_UAV_CRIT)
-            write(f"U{uav.id} {uav.battery_soc:5.1f}% {uav.battery_status}", color)
-            write(f"   {uav.flight_mode}", C_TEXT, self.font_s)
-
-        y += 6
-
-        # Task summary
-        pending   = sum(1 for t in self.tasks if t.status == "PENDING")
-        assigned  = sum(1 for t in self.tasks if t.status == "ASSIGNED")
-        done      = sum(1 for t in self.tasks if t.status == "DONE")
-        emergency = sum(1 for t in self.tasks if t.task_type == "emergency")
-
-        write("── Tasks ──", C_GRID)
-        write(f"Pending:  {pending}")
-        write(f"Assigned: {assigned}")
-        write(f"Done:     {done}")
-        write(f"Emergency:{emergency}", C_TASK_EMERG)
-
-        y += 6
-
-        # Legend
-        write("── Legend ──", C_GRID)
-        write("▲ UAV (green=ok)", C_UAV_FULL, self.font_s)
-        write("▲ UAV (yellow=warn)", C_UAV_WARN, self.font_s)
-        write("● Task normal", C_TASK_NORMAL, self.font_s)
-        write("● Task high", C_TASK_HIGH, self.font_s)
-        write("● Emergency", C_TASK_EMERG, self.font_s)
-        write("■ Charging stn", C_CHARGE, self.font_s)
-        write("● MEC server", C_MEC, self.font_s)
+        y += 16
+        legend = [
+            ("Task (normal)", COLORS["task_normal"]),
+            ("Task (high)", COLORS["task_high"]),
+            ("Task (emergency)", COLORS["task_emergency"]),
+            ("Charging station", COLORS["charging_station"]),
+            ("MEC server", COLORS["mec_server"]),
+        ]
+        for label, color in legend:
+            pygame.draw.circle(self.screen, color, (MAP_PIXELS + 22, y + 6), 5)
+            surf = self.font_small.render(label, True, COLORS["text"])
+            self.screen.blit(surf, (MAP_PIXELS + 36, y))
+            y += 20
 
     def tick(self, fps=60):
-        self.clock.tick(fps)
-
-    def close(self):
-        pygame.quit()
+        self.clock.tick(fps * config.VIZ_SPEED)
