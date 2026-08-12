@@ -1,21 +1,37 @@
 # main.py
+"""
+UAV HDRL Simulator — Stage 7 rule-based simulator (pre-DRL).
+
+Order each tick: weather -> generate tasks -> priority ranking ->
+cost-based assignment -> failure management (planned/emergency landing,
+charging) -> movement + local/MEC compute -> collision avoidance ->
+swarm load balancing (idle-UAV patrol) -> battery drain -> world/
+congestion update -> render.
+"""
+
+import numpy as np
+
 from environment.map import Map
 from uavs.uav import UAV
 from tasks.task_generator import TaskGenerator
 from tasks.priority_engine import rank_tasks
+from tasks.assignment_engine import assign_tasks
+from tasks.load_balancer import patrol_idle_uavs
+from uavs.collision import apply_collision_avoidance
+from uavs.failure_management import manage_failures
 from offloading.mec_offload import MECServer, decide_offload
-from visualization.sim_viz import SimVisualizer
 from weatherr.weather_engine import WeatherSystem
+from visualization.sim_viz import SimVisualizer
 from configs.config import (
     NUM_UAVS, TOTAL_SIM_TIME, TIMESTEP,
     MAP_WIDTH, MAP_HEIGHT, VIZ_SPEED,
-    CHARGING_RATE, MAX_BATTERY, WEATHER_SPEEDUP,
-    CHARGING_STATION_CAPACITY
 )
-import numpy as np
 
-# ── Init world ────────────────────────────────────────────────────────────────
+FAILURE_STATUSES = ("WARNING", "CRITICAL", "EMERGENCY", "DEAD")
+
+# ── Init world ────────────────────────────────────────────────────────────
 world = Map()
+
 uavs = [UAV(i, [np.random.uniform(0, MAP_WIDTH),
               np.random.uniform(0, MAP_HEIGHT), 50])
         for i in range(NUM_UAVS)]
@@ -23,137 +39,102 @@ uavs = [UAV(i, [np.random.uniform(0, MAP_WIDTH),
 mec_servers = [MECServer(i, cs["position"])
                for i, cs in enumerate(world.charging_stations)]
 
-gen = TaskGenerator()
-weather = WeatherSystem()          # loads data/historical_storm.csv
+gen = TaskGenerator(world)
+weather = WeatherSystem("data/historical_storm.csv")
 viz = SimVisualizer(world, uavs, mec_servers)
 
 all_tasks = []
 sim_time = 0.0
 
-
-def choose_station(uav, stations, uavs, capacity):
-    """Pick the nearest charging station that isn't over capacity.
-    If every station is full, fall back to the least-crowded one."""
-    pos2d = uav.position[:2]
-    candidates = []
-    for cs in stations:
-        occupants = sum(
-            1 for other in uavs
-            if other is not uav
-            and other.is_charging
-            and other.target_station is cs
-        )
-        dist = np.linalg.norm(np.array(cs["position"]) - pos2d)
-        candidates.append((cs, dist, occupants))
-
-    free = [c for c in candidates if c[2] < capacity]
-    pool = free if free else candidates          # all full → take least-bad option
-    best = min(pool, key=lambda c: (c[2], c[1]))  # prefer free, then nearest
-    return best[0], best[1]
-
-
-# ── Simulation loop ───────────────────────────────────────────────────────────
+# ── Simulation loop ──────────────────────────────────────────────────────
 while viz.running and sim_time < TOTAL_SIM_TIME:
 
-    # 1. Weather tick — compress the full historical storm timeline into
-    #    the simulation window so severity actually changes over the run
-    weather.tick(TIMESTEP * WEATHER_SPEEDUP)
+    # 1. Weather
+    weather.tick(TIMESTEP)
     weather.update_regions(world)
 
-    # Debug: uncomment to confirm weather is actually advancing
-    # if int(sim_time * 10) % 20 == 0:
-    #     print(f"t={weather.sim_time:.0f}s  rain={weather.current_precipitation:.2f}mm  wind={weather.current_wind_speed:.2f}kph")
-
-    # 2. Generate new tasks
+    # 2. Generate tasks
     new_tasks = gen.generate_tasks(sim_time, TIMESTEP)
     for t in new_tasks:
         world.register_task_to_region(t)
     all_tasks.extend(new_tasks)
 
-    # 3. Assign pending tasks to the nearest FREE, HEALTHY UAV
-    #    (UAVs mid-charge-cycle are skipped even once their SOC has
-    #    climbed back above the WARNING threshold — they stay off-duty
-    #    until they've charged all the way to MAX_BATTERY)
+    # 3. Priority ranking + cost-based assignment (fixes: priority was
+    #    computed but never consulted by assignment before this)
     pending = [t for t in all_tasks if t.status == "PENDING"]
-    for task in pending:
-        best_uav, best_dist = None, float("inf")
-        for uav in uavs:
-            if uav.is_charging:
-                continue
-            if uav.current_task is not None:
-                continue
-            dist = np.linalg.norm(
-                np.array([task.location[0], task.location[1]]) - uav.position[:2])
-            if dist < best_dist:
-                best_dist, best_uav = dist, uav
-        if best_uav:
-            task.status = "ASSIGNED"
-            task.assigned_uav = best_uav.id
-            best_uav.current_task = task
+    ranked = rank_tasks(pending, sim_time, world)
+    free_uavs = [u for u in uavs if u.current_task is None
+                 and u.battery_status not in FAILURE_STATUSES
+                 and not u.is_charging]
+    assign_tasks(ranked, free_uavs, world, sim_time)
+    print(f"Tick {sim_time:.1f}s: {len(new_tasks)} new tasks, "
+          f"{len(pending)} pending, {len(free_uavs)} free UAVs")
+    # 4. Failure management: planned + emergency landing, drops tasks
+    #    back to the pool, navigates to / charges at a station.
+    manage_failures(uavs, world, all_tasks, TIMESTEP)
 
-    # 4. Move UAVs — charge to full if low battery, otherwise work the task
-    #    (this is its own top-level step, not nested inside Step 3)
+    # 5. Move UAVs toward assigned tasks + local/MEC compute
     for uav in uavs:
-        # Start a charging cycle the moment battery drops critical-low
-        if uav.battery_status in ("WARNING", "CRITICAL", "EMERGENCY") and not uav.is_charging:
-            uav.is_charging = True
-            if uav.current_task is not None:
-                uav.current_task.status = "PENDING"
-                uav.current_task.assigned_uav = None
+        if uav.battery_status in FAILURE_STATUSES:
+            continue  # handled by manage_failures this tick
+        task = uav.current_task
+        if task is None:
+            continue
+
+        if uav.compute_timer > 0:
+            uav.compute_timer -= TIMESTEP
+            uav.flight_mode = "HOVER"
+            if uav.compute_timer <= 0:
+                task.status = "DONE"
+                region = world.get_region_of_position(task.location[0], task.location[1])
+                if region:
+                    region.remove_task(task)
                 uav.current_task = None
-
-        if uav.is_charging:
-            if uav.target_station is None:
-                uav.target_station, _ = choose_station(
-                    uav, world.charging_stations, uavs, CHARGING_STATION_CAPACITY)
-
-            station = uav.target_station
-            dist = np.linalg.norm(np.array(station["position"]) - uav.position[:2])
-
-            if dist > 20:
-                uav.flight_mode = "EMERGENCY_DESCENT"
-                target = [station["position"][0], station["position"][1], 50]
-                uav.move_towards(target, TIMESTEP)
-            else:
-                uav.flight_mode = "HOVER"
-                uav.battery_soc = min(MAX_BATTERY, uav.battery_soc + CHARGING_RATE * TIMESTEP)
-                uav.update_battery_state()
-
-                # Only released once charged all the way to 100%
-                if uav.battery_soc >= MAX_BATTERY:
-                    uav.is_charging = False
-                    uav.target_station = None
-                    uav.flight_mode = "CRUISE"
-
         else:
-            if uav.current_task and uav.current_task.status == "ASSIGNED":
-                target = [uav.current_task.location[0],
-                          uav.current_task.location[1], 50]
-                uav.move_towards(target, TIMESTEP)
+            target = [task.location[0], task.location[1], 50]
+            uav.flight_mode = "CRUISE"
+            uav.move_towards(target, TIMESTEP)
+            if uav.distance_to(target) < 20:
+                weather_factor = 1.0 - (uav.current_region.weather_severity
+                                         if uav.current_region else 0.0)
+                decision = decide_offload(task, uav, mec_servers, sim_time,
+                                           weather_factor=weather_factor)
+                uav.compute_timer = decision["latency"]
 
-                dist = np.linalg.norm(np.array(target[:2]) - uav.position[:2])
-                if dist < 20:
-                    uav.current_task.status = "DONE"
-                    region = world.get_region_of_position(
-                        uav.current_task.location[0],
-                        uav.current_task.location[1])
-                    region.remove_task(uav.current_task)
-                    uav.current_task = None
+    # Deadline expiry -> FAILED (covers pending AND in-flight tasks)
+    for t in all_tasks:
+        if t.status in ("PENDING", "ASSIGNED") and sim_time - t.arrival_time > t.deadline:
+            t.status = "FAILED"
+            if t.assigned_uav is not None:
+                owner = next((u for u in uavs if u.id == t.assigned_uav), None)
+                if owner and owner.current_task is t:
+                    owner.current_task = None
+                    owner.compute_timer = 0.0
 
-        # Drain battery — weather-aware (bad weather in the UAV's region
-        # increases drain, per battery_engine.update_soc's weather_factor)
-        weather_factor = 1.0
-        if uav.current_region is not None:
-            weather_factor = 1.0 - uav.current_region.weather_severity
+    # 6. Collision avoidance
+    apply_collision_avoidance(uavs, TIMESTEP)
+
+    # 7. Swarm load balancing — idle, healthy UAVs patrol toward hotspots
+    patrol_idle_uavs(uavs, world, TIMESTEP)
+
+    # 8. Battery drain (every UAV, every tick)
+    for uav in uavs:
+        weather_factor = 1.0 - (uav.current_region.weather_severity
+                                 if uav.current_region else 0.0)
         uav.drain_battery(TIMESTEP, weather_factor)
 
-    # 5. Update world state (uav counts, congestion, current_region refs)
+    # 9. World update
     world.tick(uavs)
 
-    # 6. Render
+    # 10. Render
     viz.render(all_tasks, sim_time)
     viz.tick(fps=60)
     sim_time += TIMESTEP * VIZ_SPEED
 
 viz.close()
 print("Simulation ended.")
+
+done = sum(1 for t in all_tasks if t.status == "DONE")
+failed = sum(1 for t in all_tasks if t.status == "FAILED")
+in_progress = sum(1 for t in all_tasks if t.status in ("PENDING", "ASSIGNED"))
+print(f"Done={done}  Failed={failed}  Pending/InProgress={in_progress}  Total={len(all_tasks)}")

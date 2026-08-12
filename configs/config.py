@@ -70,7 +70,7 @@ CHARGING_RATE = 4.0        # % per second
 CHARGING_STATION_CAPACITY = 4
 
 #Simulation Settings
-TOTAL_SIM_TIME = 300        # seconds
+TOTAL_SIM_TIME = 500        # seconds
 # Weather playback speed — compress the full historical storm timeline
 # (95 hrs / 342000s in historical_storm.csv) into the simulation window
 STORM_DURATION_S = 342000.0        # last timestamp in historical_storm.csv
@@ -118,3 +118,45 @@ FLIGHT_MODE_POWER_PROFILE = {
     "ECO":               {"power_level": "VERY_LOW", "hover_coeff": 0.6, "movement_coeff": 0.6, "cpu_coeff": 0.5, "comm_coeff": 0.7},
     "EMERGENCY_DESCENT": {"power_level": "HIGH",     "hover_coeff": 1.2, "movement_coeff": 1.5, "cpu_coeff": 1.0, "comm_coeff": 1.0},
 }
+# =============================================================================
+# APPEND THIS BLOCK to the END of configs/config.py (single-uav-simulator
+# branch). Same fixes as main — collision/load-balancer constants are
+# omitted since those two systems aren't ported here (see uav_EDITS.py /
+# guide for why).
+# =============================================================================
+
+# --- Priority scoring (Phase 9, revised) — identical rationale to main branch
+PRIORITY_WEIGHTS = {
+    "deadline":   0.4375,
+    "weather":    0.1875,
+    "queue":      0.1875,
+    "importance": 0.1875,
+}
+
+# --- Assignment cost function (Phase 8, Slide 8) — battery lives here now
+ASSIGNMENT_WEIGHTS = {
+    "distance":   0.25,
+    "delay":      0.15,
+    "energy":     0.25,
+    "weather":    0.15,
+    "congestion": 0.10,
+    "priority":   0.30,
+}
+MAX_ASSIGN_DISTANCE = 1.4142 * MAP_WIDTH
+
+# --- Battery FSM: DEAD state -------------------------------------------------
+BATTERY_DEAD = 0.0
+
+# --- Charging release threshold fix (80%, matches spec) ---------------------
+CHARGING_RELEASE_SOC = 80.0
+
+# --- Collision avoidance (Stage 7 / Phase 11) --------------------------------
+COLLISION_SAFE_DISTANCE = 150.0
+COLLISION_REPULSION_GAIN = 40.0
+
+# --- Swarm load balancing (Stage 7 / Phase 12) -------------------------------
+CONGESTION_HOTSPOT_THRESHOLD = 0.6
+LOAD_BALANCE_PATROL_MODE = "ECO"
+
+# --- Failure management (Stage 7 / Phase 13) --------------------------------
+SAFE_ZONE_MIN_UAV_SEPARATION = 100.0

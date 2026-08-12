@@ -1,7 +1,7 @@
 import numpy as np
 from configs.config import (
     MAX_BATTERY, MAX_SPEED, BATTERY_WARNING, BATTERY_CRITICAL,
-    BATTERY_EMERGENCY, BATTERY_FULL, BATTERY_NORMAL, UAV_CPU_GHZ
+    BATTERY_EMERGENCY, BATTERY_FULL, BATTERY_NORMAL, UAV_CPU_GHZ, BATTERY_DEAD
 )
 from power.battery_engine import update_soc
 
@@ -33,7 +33,12 @@ class UAV:
         self.task_queue = []
         self.current_task = None
         self.current_region = None
-
+        self.compute_timer = 0.0
+    def distance_to(self, other_position):
+        """2D distance from this UAV to a [x, y, ...] world position."""
+        import numpy as np
+        return float(np.linalg.norm(np.array(other_position[:2]) - self.position[:2]))
+    
     def update_position(self, dt):
         speed = np.linalg.norm(self.velocity)
         if speed > self.max_speed:
@@ -70,16 +75,18 @@ class UAV:
 
     def update_battery_state(self):
         soc = self.battery_soc
-        if soc >= BATTERY_FULL:
-            self.battery_status = "FULL"
-        elif soc >= BATTERY_NORMAL:
-            self.battery_status = "NORMAL"
-        elif soc >= BATTERY_WARNING:
-            self.battery_status = "WARNING"
-        elif soc >= BATTERY_CRITICAL:
-            self.battery_status = "CRITICAL"
-        else:
+        if soc <= BATTERY_DEAD:
+            self.battery_status = "DEAD"
+        elif soc < BATTERY_EMERGENCY:
             self.battery_status = "EMERGENCY"
+        elif soc < BATTERY_CRITICAL:
+            self.battery_status = "CRITICAL"
+        elif soc < BATTERY_WARNING:
+            self.battery_status = "WARNING"
+        elif soc < BATTERY_FULL:
+            self.battery_status = "NORMAL"
+        else:
+            self.battery_status = "FULL"
 
     def __repr__(self):
         return (f"UAV({self.id}) | Pos: {self.position} | "

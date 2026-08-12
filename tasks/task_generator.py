@@ -5,7 +5,8 @@ from configs.config import (MAP_WIDTH, MAP_HEIGHT, TASK_ARRIVAL_RATE, PRIORITY_D
 
 
 class TaskGenerator:
-    def __init__(self):
+    def __init__(self, world_map):
+        self.world_map = world_map
         self.task_counter = 0
         self.emergency_counter = 0
         self.max_emergencies = NUM_EMERGENCY_EVENTS
