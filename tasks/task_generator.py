@@ -1,5 +1,9 @@
 import numpy as np
 from tasks.task import Task
+# tasks/task_generator.py — imports, add:
+from uavs.airspace import is_in_no_fly_zone
+
+MAX_LOCATION_ATTEMPTS = 20
 from configs.config import (MAP_WIDTH, MAP_HEIGHT, TASK_ARRIVAL_RATE, PRIORITY_DISTRIBUTION, NUM_EMERGENCY_EVENTS, TOTAL_SIM_TIME, REGION_WORKLOAD,
     WORKLOAD_TO_LAMBDA)
 
@@ -46,7 +50,21 @@ class TaskGenerator:
                 self.emergency_times.remove(etime)
         # print("Inside generator:", len(new_tasks))
         return new_tasks
-
+    # tasks/task_generator.py — inside class TaskGenerator, add this method:
+    def _sample_free_point(self, xmin, xmax, ymin, ymax):
+        """Uniform-random point in the given bbox, retried if it lands
+        inside a no-fly zone. Falls back to the last sample (with a
+        warning) rather than hanging, in case a bbox is mostly covered
+        by a zone."""
+        for _ in range(MAX_LOCATION_ATTEMPTS):
+            x = np.random.uniform(xmin, xmax)
+            y = np.random.uniform(ymin, ymax)
+            if not is_in_no_fly_zone(x, y):
+                return x, y
+        print(f"[task_generator] WARNING: no clear point found in bbox "
+              f"({xmin:.0f},{ymin:.0f})-({xmax:.0f},{ymax:.0f}) after "
+              f"{MAX_LOCATION_ATTEMPTS} tries; using last sample anyway.")
+        return x, y
     def _create_task(self, current_time,region_id, task_type="normal"):
         self.task_counter += 1
 
@@ -65,20 +83,19 @@ class TaskGenerator:
 
         ymin = row * region_height
         ymax = ymin + region_height
-
-        x = np.random.uniform(xmin, xmax)
-        y = np.random.uniform(ymin, ymax)
-
         if task_type == "emergency":
-            x = np.random.uniform(0, MAP_WIDTH)
-            y = np.random.uniform(0, MAP_HEIGHT)
+            x, y = self._sample_free_point(0, MAP_WIDTH, 0, MAP_HEIGHT)
             priority = "emergency"
             deadline = np.random.uniform(5, 15)
             cpu_cycles = np.random.uniform(1e8, 5e8)
         else:
+            x, y = self._sample_free_point(xmin, xmax, ymin, ymax)
             priority = self._sample_priority()
             deadline = np.random.uniform(10, 60)
             cpu_cycles = np.random.uniform(1e7, 1e8)
+       
+        
+    
 
         data_size = np.random.uniform(0.5, 5.0)  # MB
 

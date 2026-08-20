@@ -62,6 +62,8 @@
 #     def __repr__(self):
 #         return f"Map({self.width}x{self.height}) | {len(self.regions)} regions | {len(self.charging_stations)} charging stations"
 import numpy as np
+# environment/map.py — imports, add:
+from uavs.airspace import is_in_no_fly_zone
 from configs.config import (
     MAP_WIDTH, MAP_HEIGHT, GRID_DIVISIONS,
     REGION_WORKLOAD, NUM_CHARGING_STATIONS,
@@ -149,14 +151,20 @@ class Map:
                 )
                 region_id += 1
 
+    # environment/map.py — replace _place_charging_stations:
     def _place_charging_stations(self):
         for region_id in CHARGING_STATION_REGIONS:
             center = self.regions[region_id].get_center()
+            if is_in_no_fly_zone(center[0], center[1]):
+                raise ValueError(
+                    f"Charging station in region {region_id} at {center} falls "
+                    f"inside a NO_FLY_ZONE — adjust NO_FLY_ZONES or "
+                    f"CHARGING_STATION_REGIONS in configs/config.py."
+                )
             self.charging_stations.append({
                 "region_id": region_id,
                 "position":  center
             })
-
     def get_region_of_position(self, x, y):
         region_w = self.width  / self.divisions
         region_h = self.height / self.divisions

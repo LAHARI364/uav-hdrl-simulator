@@ -160,3 +160,22 @@ LOAD_BALANCE_PATROL_MODE = "ECO"
 
 # --- Failure management (Stage 7 / Phase 13) --------------------------------
 SAFE_ZONE_MIN_UAV_SEPARATION = 100.0
+# --- Static obstacles (Stage 7 / Phase 14) -----------------------------------
+# Circular keep-out zones for physical obstacles (towers, buildings, terrain).
+# UAVs are softly repelled, same style as UAV-UAV collision avoidance.
+STATIC_OBSTACLES = [
+    {"id": "OBS-1", "center": (3000.0, 8000.0), "radius": 400.0},
+    {"id": "OBS-2", "center": (7500.0, 1500.0), "radius": 500.0},
+    {"id": "OBS-3", "center": (4000.0, 4000.0), "radius": 350.0},
+]
+OBSTACLE_SAFE_DISTANCE  = 250.0    # extra clearance beyond the obstacle's own radius
+OBSTACLE_REPULSION_GAIN = 60.0     # stronger than UAV-UAV gain, since obstacles never move
+
+# --- No-fly zones (Stage 7 / Phase 14) ---------------------------------------
+# Regulatory/hard-exclusion airspace — UAVs must never remain inside, unlike
+# obstacles which only need soft avoidance.
+NO_FLY_ZONES = [
+    {"id": "NFZ-1", "center": (2000.0, 5500.0), "radius": 700.0},
+    {"id": "NFZ-2", "center": (8000.0, 5000.0), "radius": 600.0},
+]
+NO_FLY_ZONE_MARGIN = 50.0          # extra buffer added on top of the stated radius

@@ -29,7 +29,7 @@ def apply_collision_avoidance(uavs, dt):
 
             # Don't repel two UAVs both converging on a charging station —
             # they need to cluster there, not dodge each other.
-            if a.battery_status in FAILURE_STATUSES and b.battery_status in FAILURE_STATUSES:
+            if a.is_charging and b.is_charging:
                 continue
 
             delta = a.position[:2] - b.position[:2]

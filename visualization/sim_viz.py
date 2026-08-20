@@ -1,6 +1,12 @@
 # visualization/sim_viz.py
 
 import pygame
+# visualization/sim_viz.py — imports, add NO_FLY_ZONES/STATIC_OBSTACLES:
+from configs.config import (
+    MAP_WIDTH, MAP_HEIGHT, GRID_DIVISIONS,
+    BATTERY_WARNING, BATTERY_CRITICAL, BATTERY_EMERGENCY,
+    NO_FLY_ZONES, STATIC_OBSTACLES,
+)
 import numpy as np
 from configs.config import (
     MAP_WIDTH, MAP_HEIGHT, GRID_DIVISIONS,
@@ -30,6 +36,10 @@ C_MEC         = (160,  80, 220)
 C_CHARGE      = (50,  220, 200)
 C_TEXT        = (200, 210, 230)
 C_PANEL_BG    = (15,  18,  30)
+# visualization/sim_viz.py — colors, add:
+C_NFZ_FILL    = (200,  30,  30)
+C_NFZ_EDGE    = (255,  60,  60)
+C_OBSTACLE    = (120, 120, 130)
 
 WORKLOAD_COLORS = {
     "LOW":    C_REGION_LOW,
@@ -77,6 +87,18 @@ class SimVisualizer:
         self.screen.fill(C_BG)
         self._draw_regions()
         self._draw_grid()
+        # visualization/sim_viz.py — render(), add the two new draw calls after _draw_grid():
+        self.screen.fill(C_BG)
+        self._draw_regions()
+        self._draw_grid()
+        self._draw_obstacles()
+        self._draw_no_fly_zones()
+        self._draw_charging_stations()
+        self._draw_mec_servers()
+        self._draw_tasks()
+        self._draw_uavs()
+        self._draw_panel()
+        pygame.display.flip()
         self._draw_charging_stations()
         self._draw_mec_servers()
         self._draw_tasks()
@@ -185,6 +207,49 @@ class SimVisualizer:
             pygame.draw.circle(self.screen, C_TEXT, (sx, sy), 8, 1)
             label = self.font_s.render("M", True, C_BG)
             self.screen.blit(label, (sx - 4, sy - 5))
+    
+
+    # visualization/sim_viz.py — new methods, add anywhere in the class:
+    def _draw_obstacles(self):
+        for obs in STATIC_OBSTACLES:
+            cx, cy = obs["center"]
+            sx, sy = world_to_screen(cx, cy)
+            sr = max(int((obs["radius"] / MAP_WIDTH) * SCREEN_W), 2)
+            pygame.draw.circle(self.screen, C_OBSTACLE, (sx, sy), sr)
+            pygame.draw.circle(self.screen, C_TEXT, (sx, sy), sr, 1)
+            label = self.font_s.render(obs["id"], True, C_TEXT)
+            self.screen.blit(label, (sx - label.get_width() // 2, sy - 6))
+
+    def _draw_no_fly_zones(self):
+        for zone in NO_FLY_ZONES:
+            cx, cy = zone["center"]
+            sx, sy = world_to_screen(cx, cy)
+            sr = max(int((zone["radius"] / MAP_WIDTH) * SCREEN_W), 2)
+
+            # Translucent red fill — pygame.draw has no alpha on the main
+            # surface, so composite via a small SRCALPHA surface.
+            overlay = pygame.Surface((sr * 2, sr * 2), pygame.SRCALPHA)
+            pygame.draw.circle(overlay, (*C_NFZ_FILL, 55), (sr, sr), sr)
+            self.screen.blit(overlay, (sx - sr, sy - sr))
+
+            # Solid warning-red boundary ring
+            pygame.draw.circle(self.screen, C_NFZ_EDGE, (sx, sy), sr, 2)
+
+            # Hazard tick-marks around the ring so it reads as "restricted"
+            # without relying on color alone
+            n_ticks = max(int(sr / 12), 8)
+            for i in range(n_ticks):
+                if i % 2 == 0:
+                    continue
+                angle = 2 * np.pi * i / n_ticks
+                x1 = sx + sr * np.cos(angle)
+                y1 = sy + sr * np.sin(angle)
+                x2 = sx + (sr - 7) * np.cos(angle)
+                y2 = sy + (sr - 7) * np.sin(angle)
+                pygame.draw.line(self.screen, C_NFZ_EDGE, (x1, y1), (x2, y2), 2)
+
+            label = self.font_s.render(f"NO-FLY {zone['id']}", True, C_NFZ_EDGE)
+            self.screen.blit(label, (sx - label.get_width() // 2, sy - 6))
 
     # ── Side panel ────────────────────────────────────────────────────────────
     def _draw_panel(self):
@@ -238,6 +303,11 @@ class SimVisualizer:
         write("● Emergency", C_TASK_EMERG, self.font_s)
         write("■ Charging stn", C_CHARGE, self.font_s)
         write("● MEC server", C_MEC, self.font_s)
+        # visualization/sim_viz.py — _draw_panel(), add to the legend:
+        write("■ Charging stn", C_CHARGE, self.font_s)
+        write("● MEC server", C_MEC, self.font_s)
+        write("▨ Obstacle", C_OBSTACLE, self.font_s)
+        write("⛔ No-fly zone", C_NFZ_EDGE, self.font_s)
 
     def tick(self, fps=60):
         self.clock.tick(fps)

@@ -22,6 +22,7 @@ from uavs.failure_management import manage_failures
 from offloading.mec_offload import MECServer, decide_offload
 from weatherr.weather_engine import WeatherSystem
 from visualization.sim_viz import SimVisualizer
+from uavs.airspace import apply_obstacle_avoidance, apply_no_fly_zones
 from configs.config import (
     NUM_UAVS, TOTAL_SIM_TIME, TIMESTEP,
     MAP_WIDTH, MAP_HEIGHT, VIZ_SPEED,
@@ -113,14 +114,21 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
 
     # 6. Collision avoidance
     apply_collision_avoidance(uavs, TIMESTEP)
+    # main.py — Step 6, right after the existing collision-avoidance call:
+    # 6. Collision avoidance (UAV-UAV, then static obstacles + no-fly zones)
+    apply_collision_avoidance(uavs, TIMESTEP)
+    apply_obstacle_avoidance(uavs, TIMESTEP)
+    apply_no_fly_zones(uavs, TIMESTEP)
 
     # 7. Swarm load balancing — idle, healthy UAVs patrol toward hotspots
     patrol_idle_uavs(uavs, world, TIMESTEP)
 
     # 8. Battery drain (every UAV, every tick)
     for uav in uavs:
+        if uav.is_charging or uav.battery_status == "DEAD":
+            continue  # no aerodynamic/CPU drain while grounded+charging, or already dead
         weather_factor = 1.0 - (uav.current_region.weather_severity
-                                 if uav.current_region else 0.0)
+                             if uav.current_region else 0.0)
         uav.drain_battery(TIMESTEP, weather_factor)
 
     # 9. World update
