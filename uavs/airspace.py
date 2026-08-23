@@ -43,14 +43,23 @@ def _soft_repel(uav, center, keep_out_radius, gain, dt):
 
 
 def apply_obstacle_avoidance(uavs, dt):
-    """Soft repulsion away from static physical obstacles."""
+    """Soft repulsion away from static physical obstacles, with a hard
+    clamp so fast-moving UAVs can't punch straight through in one tick."""
     for uav in uavs:
         if uav.battery_status == "DEAD":
-            continue  # grounded, not flying — obstacles don't apply
+            continue
         for obs in STATIC_OBSTACLES:
             keep_out = obs["radius"] + OBSTACLE_SAFE_DISTANCE
             _soft_repel(uav, obs["center"], keep_out, OBSTACLE_REPULSION_GAIN, dt)
 
+            center = np.asarray(obs["center"], dtype=float)
+            delta = uav.position[:2] - center
+            dist = np.linalg.norm(delta)
+            if dist < obs["radius"]:
+                if dist < 1e-6:
+                    delta = np.random.uniform(-1, 1, size=2)
+                    dist = np.linalg.norm(delta) + 1e-6
+                uav.position[:2] = center + (delta / dist) * (obs["radius"] + 1e-3)
 
 def apply_no_fly_zones(uavs, dt):
     """Soft repulsion near the boundary, PLUS a hard clamp so no UAV can

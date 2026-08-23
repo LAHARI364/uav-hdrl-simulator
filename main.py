@@ -67,7 +67,7 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
     free_uavs = [u for u in uavs if u.current_task is None
                  and u.battery_status not in FAILURE_STATUSES
                  and not u.is_charging]
-    assign_tasks(ranked, free_uavs, world, sim_time)
+    assign_tasks(ranked, free_uavs, world, sim_time, mec_servers)
     print(f"Tick {sim_time:.1f}s: {len(new_tasks)} new tasks, "
           f"{len(pending)} pending, {len(free_uavs)} free UAVs")
     # 4. Failure management: planned + emergency landing, drops tasks
