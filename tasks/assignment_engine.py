@@ -44,12 +44,11 @@ def _time_needed(task, uav, distance):
     return travel_time + compute_time
 
 
-def _is_feasible(task, uav, distance, current_time):
+def _is_feasible(task, uav, distance, current_time, safety_margin=1.2):
     if task.deadline <= 0:
         return True
     time_remaining = task.deadline - (current_time - task.arrival_time)
-    return _time_needed(task, uav, distance) <= time_remaining
-
+    return _time_needed(task, uav, distance) * safety_margin <= time_remaining
 
 def compute_cost(task, uav, world, current_time, distance):
     region = (world.regions[task.region_id] if task.region_id is not None
@@ -127,3 +126,72 @@ def assign_tasks(ranked_tasks, candidate_uavs, world, current_time, mec_servers=
             task.status = "ASSIGNED"
             task.assigned_uav = None
             task.assigned_mec = server.server_id
+
+def debug_print_uav_view(uavs, ranked_tasks, world, current_time):
+    """
+    Diagnostic only. For every UAV: what task it's currently doing
+    (if any) with the full cost breakdown that was/would be used to
+    score it, and what's sitting in its waiting list (task_queue).
+    Pending tasks list (priority order) shown separately at the end.
+    """
+    w = ASSIGNMENT_WEIGHTS
+    print(f"\n{'='*70}")
+    print(f"UAV VIEW @ t={current_time:.1f}s")
+    print(f"{'='*70}")
+
+    for uav in uavs:
+        print(f"\nUAV {uav.id} | battery={uav.battery_soc:.1f}% ({uav.battery_status}) | "
+              f"charging={uav.is_charging}")
+
+        if uav.current_task is not None:
+            task = uav.current_task
+            distance = uav.distance_to([task.location[0], task.location[1]])
+            region = (world.regions[task.region_id] if task.region_id is not None
+                      else world.get_region_of_position(task.location[0], task.location[1]))
+
+            distance_score = min(distance / MAX_ASSIGN_DISTANCE, 1.0)
+            travel_time = distance / max(MAX_SPEED, 1e-6)
+            delay_score = min(travel_time / task.deadline, 1.0) if task.deadline > 0 else 0.0
+            energy_wh = _estimate_task_energy_wh(task, uav, distance)
+            remaining_wh = (uav.battery_soc / 100.0) * BATTERY_CAPACITY_WH
+            energy_score = 1.0 if remaining_wh <= 1e-6 else min(energy_wh / remaining_wh, 1.0)
+            weather_score = region.weather_severity if region else 0.0
+            congestion_score = region.congestion if region else 0.0
+            priority_score = getattr(task, "numeric_priority", 0.0)
+
+            total = (w["distance"]*distance_score + w["delay"]*delay_score +
+                     w["energy"]*energy_score + w["weather"]*weather_score +
+                     w["congestion"]*congestion_score - w["priority"]*priority_score)
+
+            print(f"  CURRENTLY DOING: Task {task.task_id} ({task.priority}) "
+                  f"status={task.status}")
+            print(f"    distance_score={distance_score:.3f} (w={w['distance']}) "
+                  f"-> {w['distance']*distance_score:+.3f}")
+            print(f"    delay_score   ={delay_score:.3f} (w={w['delay']}) "
+                  f"-> {w['delay']*delay_score:+.3f}")
+            print(f"    energy_score  ={energy_score:.3f} (w={w['energy']}) "
+                  f"-> {w['energy']*energy_score:+.3f}")
+            print(f"    weather_score ={weather_score:.3f} (w={w['weather']}) "
+                  f"-> {w['weather']*weather_score:+.3f}")
+            print(f"    congestion    ={congestion_score:.3f} (w={w['congestion']}) "
+                  f"-> {w['congestion']*congestion_score:+.3f}")
+            print(f"    priority_score={priority_score:.3f} (w={w['priority']}) "
+                  f"-> {-w['priority']*priority_score:+.3f}")
+            print(f"    TOTAL COST = {total:.3f}  (lower = better)")
+        else:
+            print("  CURRENTLY DOING: nothing (idle/free)")
+
+        if uav.task_queue:
+            queued_ids = [t.task_id for t in uav.task_queue]
+            print(f"  WAITING LIST: {queued_ids}")
+        else:
+            print("  WAITING LIST: empty")
+
+    print(f"\n{'-'*70}")
+    print("PENDING TASKS (priority order, not yet assigned to anyone)")
+    print(f"{'-'*70}")
+    for rank, task in enumerate(ranked_tasks, 1):
+        print(f"  [{rank}] Task {task.task_id} ({task.priority}) "
+              f"priority_score={getattr(task, 'numeric_priority', 0.0):.3f} "
+              f"deadline={task.deadline:.1f}s")
+    print(f"{'='*70}\n")           

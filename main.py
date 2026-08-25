@@ -46,6 +46,8 @@ viz = SimVisualizer(world, uavs, mec_servers)
 
 all_tasks = []
 sim_time = 0.0
+mec_offload_count = 0
+local_compute_count = 0
 
 # ── Simulation loop ──────────────────────────────────────────────────────
 while viz.running and sim_time < TOTAL_SIM_TIME:
@@ -67,6 +69,9 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
     free_uavs = [u for u in uavs if u.current_task is None
                  and u.battery_status not in FAILURE_STATUSES
                  and not u.is_charging]
+    if int(sim_time * 10) % 50 == 0:
+        from tasks.assignment_engine import debug_print_uav_view
+        debug_print_uav_view(uavs, ranked, world, sim_time)    
     assign_tasks(ranked, free_uavs, world, sim_time, mec_servers)
     print(f"Tick {sim_time:.1f}s: {len(new_tasks)} new tasks, "
           f"{len(pending)} pending, {len(free_uavs)} free UAVs")
@@ -98,13 +103,16 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
             if uav.distance_to(target) < 20:
                 weather_factor = 1.0 - (uav.current_region.weather_severity
                                          if uav.current_region else 0.0)
-                decision = decide_offload(task, uav, mec_servers, sim_time,
-                                           weather_factor=weather_factor)
+                decision = decide_offload(task, uav, mec_servers, sim_time, weather_factor=weather_factor)
                 uav.compute_timer = decision["latency"]
-
+                if decision["strategy"] == "MEC":
+                    mec_offload_count += 1
+                else:
+                    local_compute_count += 1
     # Deadline expiry -> FAILED (covers pending AND in-flight tasks)
     for t in all_tasks:
         if t.status in ("PENDING", "ASSIGNED") and sim_time - t.arrival_time > t.deadline:
+            t.fail_reason = "NEVER_ASSIGNED" if t.status == "PENDING" else "MISSED_DEADLINE_INFLIGHT"
             t.status = "FAILED"
             if t.assigned_uav is not None:
                 owner = next((u for u in uavs if u.id == t.assigned_uav), None)
@@ -146,3 +154,7 @@ done = sum(1 for t in all_tasks if t.status == "DONE")
 failed = sum(1 for t in all_tasks if t.status == "FAILED")
 in_progress = sum(1 for t in all_tasks if t.status in ("PENDING", "ASSIGNED"))
 print(f"Done={done}  Failed={failed}  Pending/InProgress={in_progress}  Total={len(all_tasks)}")
+print(f"MEC Offloads: {mec_offload_count}, Local Computes: {local_compute_count}")
+from collections import Counter
+fail_reasons = Counter(getattr(t, "fail_reason", "UNKNOWN") for t in all_tasks if t.status == "FAILED")
+print("Failure breakdown:", dict(fail_reasons))
