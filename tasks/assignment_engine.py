@@ -23,9 +23,11 @@ from configs.config import (
 INELIGIBLE_STATUSES = ("WARNING", "CRITICAL", "EMERGENCY", "DEAD")
 
 
-def _eligible(uav):
-    return uav.current_task is None and uav.battery_status not in INELIGIBLE_STATUSES
+MAX_QUEUE_PER_UAV = 3
 
+def _eligible(uav):
+    return (len(uav.task_queue) < MAX_QUEUE_PER_UAV
+            and uav.battery_status not in INELIGIBLE_STATUSES)
 
 def _estimate_task_energy_wh(task, uav, distance):
     travel_time = distance / max(MAX_SPEED, 1e-6)
@@ -93,19 +95,12 @@ def _nearest_reachable_mec(task, mec_servers):
 
 
 def assign_tasks(ranked_tasks, candidate_uavs, world, current_time, mec_servers=None):
-    """
-    Greedily assigns priority-sorted tasks to the lowest-cost free UAV
-    that can actually make the deadline. If no UAV is feasible, offloads
-    straight to the nearest reachable MEC server (task -> ASSIGNED,
-    assigned_uav stays None, handled/completed by MEC logic elsewhere).
-    If neither a UAV nor an MEC server can take it, the task is left
-    PENDING and will fail naturally at deadline expiry.
-    """
-    available = [u for u in candidate_uavs if _eligible(u)]
-
     for task in ranked_tasks:
+        if task.status != "PENDING":
+            continue        
+        candidates = [u for u in candidate_uavs if _eligible(u)]
         best_uav, best_cost = None, float("inf")
-        for uav in available:
+        for uav in candidates:
             distance = uav.distance_to([task.location[0], task.location[1]])
             if not _is_feasible(task, uav, distance, current_time):
                 continue
@@ -116,23 +111,21 @@ def assign_tasks(ranked_tasks, candidate_uavs, world, current_time, mec_servers=
         if best_uav is not None:
             task.status = "ASSIGNED"
             task.assigned_uav = best_uav.id
-            best_uav.current_task = task
-            available.remove(best_uav)
+            best_uav.task_queue.append(task)
             continue
 
-        # No UAV can make the deadline — try MEC offload directly.
         server = _nearest_reachable_mec(task, mec_servers) if mec_servers else None
         if server is not None:
             task.status = "ASSIGNED"
             task.assigned_uav = None
             task.assigned_mec = server.server_id
-
 def debug_print_uav_view(uavs, ranked_tasks, world, current_time):
     """
-    Diagnostic only. For every UAV: what task it's currently doing
-    (if any) with the full cost breakdown that was/would be used to
-    score it, and what's sitting in its waiting list (task_queue).
-    Pending tasks list (priority order) shown separately at the end.
+    Diagnostic only. For every UAV: what task it's currently actively
+    working on (current_task, picked by the scheduler) with full cost
+    breakdown, plus everything else sitting in its task_queue waiting
+    to be picked next. Pending (unassigned) tasks shown separately at
+    the end, in priority order.
     """
     w = ASSIGNMENT_WEIGHTS
     print(f"\n{'='*70}")
@@ -141,7 +134,7 @@ def debug_print_uav_view(uavs, ranked_tasks, world, current_time):
 
     for uav in uavs:
         print(f"\nUAV {uav.id} | battery={uav.battery_soc:.1f}% ({uav.battery_status}) | "
-              f"charging={uav.is_charging}")
+              f"charging={uav.is_charging} | queue_len={len(uav.task_queue)}")
 
         if uav.current_task is not None:
             task = uav.current_task
@@ -163,8 +156,9 @@ def debug_print_uav_view(uavs, ranked_tasks, world, current_time):
                      w["energy"]*energy_score + w["weather"]*weather_score +
                      w["congestion"]*congestion_score - w["priority"]*priority_score)
 
-            print(f"  CURRENTLY DOING: Task {task.task_id} ({task.priority}) "
-                  f"status={task.status}")
+            status_tag = "COMPUTING" if uav.compute_timer > 0 else "TRAVELLING"
+            print(f"  ACTIVE ({status_tag}): Task {task.task_id} ({task.priority}) "
+                  f"priority_score={priority_score:.3f}")
             print(f"    distance_score={distance_score:.3f} (w={w['distance']}) "
                   f"-> {w['distance']*distance_score:+.3f}")
             print(f"    delay_score   ={delay_score:.3f} (w={w['delay']}) "
@@ -179,19 +173,22 @@ def debug_print_uav_view(uavs, ranked_tasks, world, current_time):
                   f"-> {-w['priority']*priority_score:+.3f}")
             print(f"    TOTAL COST = {total:.3f}  (lower = better)")
         else:
-            print("  CURRENTLY DOING: nothing (idle/free)")
+            print("  ACTIVE: nothing (idle/free)")
 
-        if uav.task_queue:
-            queued_ids = [t.task_id for t in uav.task_queue]
-            print(f"  WAITING LIST: {queued_ids}")
+        waiting = [t for t in uav.task_queue if t is not uav.current_task]
+        if waiting:
+            print("  WAITING LIST (queued, not yet active):")
+            for t in sorted(waiting, key=lambda t: getattr(t, "numeric_priority", 0.0), reverse=True):
+                print(f"    Task {t.task_id} ({t.priority}) "
+                      f"priority_score={getattr(t, 'numeric_priority', 0.0):.3f}")
         else:
             print("  WAITING LIST: empty")
 
     print(f"\n{'-'*70}")
-    print("PENDING TASKS (priority order, not yet assigned to anyone)")
+    print("PENDING TASKS (priority order, not yet assigned to any UAV)")
     print(f"{'-'*70}")
     for rank, task in enumerate(ranked_tasks, 1):
         print(f"  [{rank}] Task {task.task_id} ({task.priority}) "
               f"priority_score={getattr(task, 'numeric_priority', 0.0):.3f} "
               f"deadline={task.deadline:.1f}s")
-    print(f"{'='*70}\n")           
+    print(f"{'='*70}\n")

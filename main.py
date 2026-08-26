@@ -17,6 +17,7 @@ from tasks.task_generator import TaskGenerator
 from tasks.priority_engine import rank_tasks
 from tasks.assignment_engine import assign_tasks
 from tasks.load_balancer import patrol_idle_uavs
+from tasks.scheduler import schedule_uav_tasks
 from uavs.collision import apply_collision_avoidance
 from uavs.failure_management import manage_failures
 from offloading.mec_offload import MECServer, decide_offload
@@ -66,13 +67,20 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
     #    computed but never consulted by assignment before this)
     pending = [t for t in all_tasks if t.status == "PENDING"]
     ranked = rank_tasks(pending, sim_time, world)
-    free_uavs = [u for u in uavs if u.current_task is None
+    free_uavs = [u for u in uavs if len(u.task_queue) < 3
                  and u.battery_status not in FAILURE_STATUSES
                  and not u.is_charging]
+    assign_tasks(ranked, free_uavs, world, sim_time, mec_servers)
+    schedule_uav_tasks(uavs)
+    active_task_ids = [u.current_task.task_id for u in uavs if u.current_task is not None]
+    dupes = set(x for x in active_task_ids if active_task_ids.count(x) > 1)
+    if dupes:
+        for tid in dupes:
+            owners = [u.id for u in uavs if u.current_task is not None and u.current_task.task_id == tid]
+            print(f"[DUPLICATE] Task {tid} is current_task for UAVs {owners}")    
     if int(sim_time * 10) % 50 == 0:
         from tasks.assignment_engine import debug_print_uav_view
         debug_print_uav_view(uavs, ranked, world, sim_time)    
-    assign_tasks(ranked, free_uavs, world, sim_time, mec_servers)
     print(f"Tick {sim_time:.1f}s: {len(new_tasks)} new tasks, "
           f"{len(pending)} pending, {len(free_uavs)} free UAVs")
     # 4. Failure management: planned + emergency landing, drops tasks
@@ -95,7 +103,10 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
                 region = world.get_region_of_position(task.location[0], task.location[1])
                 if region:
                     region.remove_task(task)
+                if task in uav.task_queue:
+                    uav.task_queue.remove(task)
                 uav.current_task = None
+
         else:
             target = [task.location[0], task.location[1], 50]
             uav.flight_mode = "CRUISE"
@@ -116,12 +127,14 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
             t.status = "FAILED"
             if t.assigned_uav is not None:
                 owner = next((u for u in uavs if u.id == t.assigned_uav), None)
-                if owner and owner.current_task is t:
-                    owner.current_task = None
-                    owner.compute_timer = 0.0
+                if owner:
+                    if t in owner.task_queue:
+                        owner.task_queue.remove(t)
+                    if owner.current_task is t:
+                        owner.current_task = None
+                        owner.compute_timer = 0.0
 
     # 6. Collision avoidance
-    apply_collision_avoidance(uavs, TIMESTEP)
     # main.py — Step 6, right after the existing collision-avoidance call:
     # 6. Collision avoidance (UAV-UAV, then static obstacles + no-fly zones)
     apply_collision_avoidance(uavs, TIMESTEP)

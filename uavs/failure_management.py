@@ -8,6 +8,8 @@ def _release_task(uav):
     if uav.current_task is not None:
         uav.current_task.status = "PENDING"
         uav.current_task.assigned_uav = None
+        if uav.current_task in uav.task_queue:
+            uav.task_queue.remove(uav.current_task)
         uav.current_task = None
     uav.compute_timer = 0.0
 
