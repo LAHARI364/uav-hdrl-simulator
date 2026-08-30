@@ -28,6 +28,7 @@ from configs.config import (
     NUM_UAVS, TOTAL_SIM_TIME, TIMESTEP,
     MAP_WIDTH, MAP_HEIGHT, VIZ_SPEED,
 )
+from uavs.swarm import find_neighbors, migrate_overloaded_tasks
 
 FAILURE_STATUSES = ("WARNING", "CRITICAL", "EMERGENCY", "DEAD")
 
@@ -49,6 +50,7 @@ all_tasks = []
 sim_time = 0.0
 mec_offload_count = 0
 local_compute_count = 0
+total_migrations = 0
 
 # ── Simulation loop ──────────────────────────────────────────────────────
 while viz.running and sim_time < TOTAL_SIM_TIME:
@@ -72,6 +74,12 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
                  and not u.is_charging]
     assign_tasks(ranked, free_uavs, world, sim_time, mec_servers)
     schedule_uav_tasks(uavs)
+    neighbor_map = find_neighbors(uavs)
+    if int(sim_time * 10) % 50 == 0:
+        from tasks.assignment_engine import debug_print_uav_view
+        debug_print_uav_view(uavs, ranked, world, sim_time, neighbor_map)
+    migrations = migrate_overloaded_tasks(uavs, neighbor_map, world, sim_time)
+    total_migrations += len(migrations)
     active_task_ids = [u.current_task.task_id for u in uavs if u.current_task is not None]
     dupes = set(x for x in active_task_ids if active_task_ids.count(x) > 1)
     if dupes:
@@ -80,7 +88,7 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
             print(f"[DUPLICATE] Task {tid} is current_task for UAVs {owners}")    
     if int(sim_time * 10) % 50 == 0:
         from tasks.assignment_engine import debug_print_uav_view
-        debug_print_uav_view(uavs, ranked, world, sim_time)    
+        debug_print_uav_view(uavs, ranked, world, sim_time, neighbor_map)
     print(f"Tick {sim_time:.1f}s: {len(new_tasks)} new tasks, "
           f"{len(pending)} pending, {len(free_uavs)} free UAVs")
     # 4. Failure management: planned + emergency landing, drops tasks
@@ -171,3 +179,5 @@ print(f"MEC Offloads: {mec_offload_count}, Local Computes: {local_compute_count}
 from collections import Counter
 fail_reasons = Counter(getattr(t, "fail_reason", "UNKNOWN") for t in all_tasks if t.status == "FAILED")
 print("Failure breakdown:", dict(fail_reasons))
+print(f"Total task migrations (swarm coordination): {total_migrations}")
+print("Random check:", np.random.uniform(0, 1))

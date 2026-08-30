@@ -119,13 +119,13 @@ def assign_tasks(ranked_tasks, candidate_uavs, world, current_time, mec_servers=
             task.status = "ASSIGNED"
             task.assigned_uav = None
             task.assigned_mec = server.server_id
-def debug_print_uav_view(uavs, ranked_tasks, world, current_time):
+def debug_print_uav_view(uavs, ranked_tasks, world, current_time, neighbor_map=None):
     """
-    Diagnostic only. For every UAV: what task it's currently actively
-    working on (current_task, picked by the scheduler) with full cost
-    breakdown, plus everything else sitting in its task_queue waiting
-    to be picked next. Pending (unassigned) tasks shown separately at
-    the end, in priority order.
+    Diagnostic only. For every UAV: its neighbors (if neighbor_map is
+    passed), what task it's actively working on (current_task, picked
+    by the scheduler) with full cost breakdown, plus everything else
+    sitting in its task_queue waiting to be picked next. Pending
+    (unassigned) tasks shown separately at the end, in priority order.
     """
     w = ASSIGNMENT_WEIGHTS
     print(f"\n{'='*70}")
@@ -135,6 +135,10 @@ def debug_print_uav_view(uavs, ranked_tasks, world, current_time):
     for uav in uavs:
         print(f"\nUAV {uav.id} | battery={uav.battery_soc:.1f}% ({uav.battery_status}) | "
               f"charging={uav.is_charging} | queue_len={len(uav.task_queue)}")
+
+        if neighbor_map is not None:
+            nbrs = neighbor_map.get(uav.id, [])
+            print(f"  NEIGHBORS: {nbrs if nbrs else 'none'}")
 
         if uav.current_task is not None:
             task = uav.current_task
