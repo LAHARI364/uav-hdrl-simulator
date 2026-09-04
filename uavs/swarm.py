@@ -37,49 +37,6 @@ def find_neighbors(uavs):
     return neighbors
 
 
-def migrate_overloaded_tasks(uavs, neighbor_map, world, current_time):
-    """
-    If a UAV's queue is full (or it's about to go into a failure state)
-    and a neighbor has spare queue capacity, hand off the UAV's lowest-
-    priority QUEUED (not yet active) task to that neighbor instead of
-    letting it fail or wait unnecessarily.
-    """
-    from tasks.assignment_engine import _is_feasible, compute_cost, MAX_QUEUE_PER_UAV
-
-    uav_by_id = {u.id: u for u in uavs}
-
-    for uav in uavs:
-        if uav.battery_status == "DEAD":
-            continue
-        if len(uav.task_queue) < MAX_QUEUE_PER_UAV and uav.battery_status not in ("WARNING", "CRITICAL", "EMERGENCY"):
-            continue  # not overloaded, nothing to migrate
-
-        waiting = [t for t in uav.task_queue if t is not uav.current_task]
-        if not waiting:
-            continue
-
-        candidate_ids = neighbor_map.get(uav.id, [])
-        candidates = [uav_by_id[cid] for cid in candidate_ids
-                      if len(uav_by_id[cid].task_queue) < MAX_QUEUE_PER_UAV
-                      and uav_by_id[cid].battery_status not in ("WARNING", "CRITICAL", "EMERGENCY", "DEAD")]
-        if not candidates:
-            continue
-
-        task = min(waiting, key=lambda t: getattr(t, "numeric_priority", 0.0))
-
-        best_uav, best_cost = None, float("inf")
-        for cand in candidates:
-            distance = cand.distance_to([task.location[0], task.location[1]])
-            if not _is_feasible(task, cand, distance, current_time):
-                continue
-            cost = compute_cost(task, cand, world, current_time, distance)
-            if cost < best_cost:
-                best_cost, best_uav = cost, cand
-
-        if best_uav is not None:
-            uav.task_queue.remove(task)
-            task.assigned_uav = best_uav.id
-            best_uav.task_queue.append(task)
 
 
 def migrate_overloaded_tasks(uavs, neighbor_map, world, current_time, verbose=True):
@@ -138,3 +95,45 @@ def migrate_overloaded_tasks(uavs, neighbor_map, world, current_time, verbose=Tr
                   f"({priority}) went from UAV {from_id} -> UAV {to_id}")
 
     return migrations
+def redistribute_queue(uav, neighbor_map, world, current_time, uavs, verbose=True):
+    """
+    Used when a UAV enters EMERGENCY: attempt to hand EVERY task in its
+    queue (including its current active task) to a feasible, healthy
+    neighbor. Any task that has no feasible neighbor falls back to the
+    global PENDING pool, same as before.
+
+    Returns the list of tasks that could NOT be placed with a neighbor
+    (so the caller can release them to the pool).
+    """
+    from tasks.assignment_engine import _is_feasible, compute_cost, MAX_QUEUE_PER_UAV
+
+    uav_by_id = {u.id: u for u in uavs}
+    tasks_to_place = list(uav.task_queue)  # current_task + all waiting
+    unplaced = []
+
+    for task in tasks_to_place:
+        candidate_ids = neighbor_map.get(uav.id, [])
+        candidates = [uav_by_id[cid] for cid in candidate_ids
+                      if len(uav_by_id[cid].task_queue) < MAX_QUEUE_PER_UAV
+                      and uav_by_id[cid].battery_status not in ("WARNING", "CRITICAL", "EMERGENCY", "DEAD")]
+
+        best_uav, best_cost = None, float("inf")
+        for cand in candidates:
+            distance = cand.distance_to([task.location[0], task.location[1]])
+            if not _is_feasible(task, cand, distance, current_time):
+                continue
+            cost = compute_cost(task, cand, world, current_time, distance)
+            if cost < best_cost:
+                best_cost, best_uav = cost, cand
+
+        if best_uav is not None:
+            uav.task_queue.remove(task)
+            task.assigned_uav = best_uav.id
+            best_uav.task_queue.append(task)
+            if verbose:
+                print(f"[SWARM MIGRATION] t={current_time:.1f}s | Task {task.task_id} "
+                      f"({task.priority}) went from UAV {uav.id} -> UAV {best_uav.id} (emergency redistribution)")
+        else:
+            unplaced.append(task)
+
+    return unplaced

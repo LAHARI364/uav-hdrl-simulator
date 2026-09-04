@@ -14,6 +14,7 @@ def _release_task(uav):
     uav.compute_timer = 0.0
 
 
+
 def _nearest_charging_station(uav, world):
     stations = world.charging_stations
     if not stations:
@@ -41,14 +42,14 @@ def _safe_zone(uav, world, uavs):
     return candidates[0]
 
 
-def manage_failures(uavs, world, all_tasks, dt):
+def manage_failures(uavs, world, all_tasks, dt,current_time, neighbor_map=None):
+    from uavs.swarm import redistribute_queue
+
     for uav in uavs:
         if uav.battery_status == "DEAD":
             uav.velocity[:] = 0
             continue
 
-        # Already charging — keep charging until release, regardless of
-        # battery_status (which flips to NORMAL/FULL well before 80%).
         if uav.is_charging:
             uav.battery_soc = min(uav.battery_soc + CHARGING_RATE * dt, 100.0)
             if uav.battery_soc >= CHARGING_RELEASE_SOC:
@@ -57,8 +58,21 @@ def manage_failures(uavs, world, all_tasks, dt):
             continue
 
         if uav.battery_status == "EMERGENCY":
-            _release_task(uav)
-            uav.task_queue.clear()
+            # Try to hand off every queued task to a healthy neighbor first.
+            if neighbor_map is not None:
+                unplaced = redistribute_queue(uav, neighbor_map, world, current_time, uavs=uavs)
+            else:
+                unplaced = list(uav.task_queue)
+
+            # Anything that couldn't be placed goes back to the global pool.
+            for task in unplaced:
+                task.status = "PENDING"
+                task.assigned_uav = None
+                if task in uav.task_queue:
+                    uav.task_queue.remove(task)
+            uav.current_task = None
+            uav.compute_timer = 0.0
+
             station = _safe_zone(uav, world, uavs)
             uav.flight_mode = "EMERGENCY_DESCENT"
             if station:

@@ -75,6 +75,7 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
     assign_tasks(ranked, free_uavs, world, sim_time, mec_servers)
     schedule_uav_tasks(uavs)
     neighbor_map = find_neighbors(uavs)
+    manage_failures(uavs, world, all_tasks, TIMESTEP, sim_time, neighbor_map=neighbor_map)
     if int(sim_time * 10) % 50 == 0:
         from tasks.assignment_engine import debug_print_uav_view
         debug_print_uav_view(uavs, ranked, world, sim_time, neighbor_map)
@@ -93,7 +94,7 @@ while viz.running and sim_time < TOTAL_SIM_TIME:
           f"{len(pending)} pending, {len(free_uavs)} free UAVs")
     # 4. Failure management: planned + emergency landing, drops tasks
     #    back to the pool, navigates to / charges at a station.
-    manage_failures(uavs, world, all_tasks, TIMESTEP)
+    
 
     # 5. Move UAVs toward assigned tasks + local/MEC compute
     for uav in uavs:
