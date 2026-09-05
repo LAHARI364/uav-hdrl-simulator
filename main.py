@@ -51,6 +51,8 @@ sim_time = 0.0
 mec_offload_count = 0
 local_compute_count = 0
 total_migrations = 0
+migrated_count = 0
+released_count = 0
 
 # ── Simulation loop ──────────────────────────────────────────────────────
 while viz.running and sim_time < TOTAL_SIM_TIME:

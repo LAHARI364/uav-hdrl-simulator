@@ -137,3 +137,65 @@ def redistribute_queue(uav, neighbor_map, world, current_time, uavs, verbose=Tru
             unplaced.append(task)
 
     return unplaced
+def resolve_queue_for_failing_uav(uav, neighbor_map, world, current_time, uavs, verbose=True):
+    """
+    Applied to any UAV in WARNING/CRITICAL/EMERGENCY. For every task in
+    its queue (active + waiting):
+      1. Check if the UAV itself can still finish it after charging
+         (charge_time + travel_time + compute_time <= time_remaining).
+         If yes, leave it in the queue — the UAV will resume it later.
+      2. If not, try to hand it to a feasible, healthy neighbor.
+      3. If no neighbor works, release it to the global PENDING pool.
+    """
+    from configs.config import CHARGING_RATE, CHARGING_RELEASE_SOC, MAX_SPEED
+    from tasks.assignment_engine import _is_feasible, compute_cost, MAX_QUEUE_PER_UAV
+
+    uav_by_id = {u.id: u for u in uavs}
+    tasks_to_check = list(uav.task_queue)  # active + waiting
+
+    charge_needed = max(CHARGING_RELEASE_SOC - uav.battery_soc, 0.0)
+    charge_time = charge_needed / CHARGING_RATE if CHARGING_RATE > 0 else float("inf")
+
+    for task in tasks_to_check:
+        time_remaining = task.deadline - (current_time - task.arrival_time)
+        distance = uav.distance_to([task.location[0], task.location[1]])
+        travel_time = distance / max(MAX_SPEED, 1e-6)
+        compute_time = task.cpu_cycles / (uav.cpu_capacity * 1e9)
+        self_time_needed = charge_time + travel_time + compute_time
+
+        if self_time_needed <= time_remaining:
+            if task is uav.current_task:
+                uav.current_task = None
+            continue  # leave in queue — UAV will do it after charging
+
+        candidate_ids = neighbor_map.get(uav.id, []) if neighbor_map else []
+        candidates = [uav_by_id[cid] for cid in candidate_ids
+                      if len(uav_by_id[cid].task_queue) < MAX_QUEUE_PER_UAV
+                      and uav_by_id[cid].battery_status not in ("WARNING", "CRITICAL", "EMERGENCY", "DEAD")]
+        best_uav, best_cost = None, float("inf")
+        for cand in candidates:
+            d = cand.distance_to([task.location[0], task.location[1]])
+            if not _is_feasible(task, cand, d, current_time):
+                continue
+            cost = compute_cost(task, cand, world, current_time, d)
+            if cost < best_cost:
+                best_cost, best_uav = cost, cand
+
+        uav.task_queue.remove(task)
+        if task is uav.current_task:
+            uav.current_task = None
+
+        if best_uav is not None:
+            task.assigned_uav = best_uav.id
+            best_uav.task_queue.append(task)
+            if verbose:
+                print(f"[SWARM] t={current_time:.1f}s Task {task.task_id} ({task.priority}) "
+                      f"-> UAV {best_uav.id} (from UAV {uav.id}, self-infeasible)")
+        else:
+            task.status = "PENDING"
+            task.assigned_uav = None
+            if verbose:
+                print(f"[SWARM] t={current_time:.1f}s Task {task.task_id} ({task.priority}) "
+                      f"released to pool (from UAV {uav.id}, no feasible neighbor)")
+
+    uav.compute_timer = 0.0
